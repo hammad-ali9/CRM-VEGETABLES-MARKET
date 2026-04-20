@@ -148,12 +148,12 @@ const AccountsModule: React.FC = () => {
             <div className="summary-panel">
               <h3 style={{ fontSize: '1.1rem', marginBottom: 16 }}>منافع کا حساب (Profit Calculation)</h3>
               <div className="summary-row">
-                <span className="label">Supplier Commission (13.6%)</span>
-                <span className="value green">{fmt(store.totalSupplierComm)}</span>
+                <span className="label">Supplier Labour (مزدوری)</span>
+                <span className="value green">{fmt(store.totalSupplierLabour)}</span>
               </div>
               <div className="summary-row">
-                <span className="label">Supplier Wari (نقد واری)</span>
-                <span className="value green">{fmt(store.totalSupplierWari)}</span>
+                <span className="label">Supplier Carriage (لاگا)</span>
+                <span className="value green">{fmt(store.totalSupplierCarriage)}</span>
               </div>
               <div className="summary-row">
                 <span className="label">Customer Commission (7.25%)</span>
@@ -178,10 +178,6 @@ const AccountsModule: React.FC = () => {
               <div className="summary-row">
                 <span className="label" style={{ color: 'var(--blue)' }}>Investor Shares</span>
                 <span className="value" style={{ color: 'var(--blue)' }}>-{fmt(store.totalInvestorShare)}</span>
-              </div>
-              <div className="summary-row">
-                <span className="label" style={{ color: 'var(--blue)' }}>Partner Shares</span>
-                <span className="value" style={{ color: 'var(--blue)' }}>-{fmt(store.totalPartnerShare)}</span>
               </div>
               <div className="summary-row" style={{ borderTop: '1px solid var(--border)', paddingTop: 10, marginTop: 4 }}>
                 <span className="label" style={{ fontWeight: 700, fontSize: '1rem' }}>Net Profit (خالص منافع)</span>

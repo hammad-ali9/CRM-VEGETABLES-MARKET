@@ -1,51 +1,42 @@
 import React, { useState } from 'react';
-import { useStore, calcSupplierBalance, calcCustomerBalance, calcSaleNet, calcTruckCommission, calcTruckCashWari, calcSaleCommission, calcSaleCashWari } from '../store';
+import { useStore, calcSupplierBalance, calcCustomerBalance, calcSaleNet, calcSaleCommission, calcSaleCashWari } from '../store';
 import { Printer } from 'lucide-react';
 import { openPrintWindow } from '../utils/printTemplate';
-import { getPeriodLabel } from '../utils/printUtils';
 
 const ReportsModule: React.FC = () => {
   const store = useStore();
-  const [reportPeriod, setReportPeriod] = useState<'daily' | 'weekly' | 'monthly'>('daily');
+  const today = new Date();
+  const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
+  const lastDayOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
+  
+  const [startDate, setStartDate] = useState<string>(firstDayOfMonth);
+  const [endDate, setEndDate] = useState<string>(lastDayOfMonth);
   const [activeReport, setActiveReport] = useState<'pnl' | 'remainings'>('pnl');
 
   const fmt = (n: number) => `Rs. ${(n || 0).toLocaleString()}`;
 
-  // ── Period filter using actual calendar boundaries ──
+  // ── Period filter using date range ──
   const isWithinPeriod = (dateStr: string | null | undefined): boolean => {
     if (!dateStr) return false;
-    const d = new Date(dateStr);
-    const now = new Date();
-    if (reportPeriod === 'daily') {
-      return dateStr.slice(0, 10) === now.toISOString().slice(0, 10);
-    }
-    if (reportPeriod === 'weekly') {
-      // Current calendar week (Mon–Sun)
-      const day = now.getDay(); // 0=Sun
-      const startOfWeek = new Date(now);
-      startOfWeek.setDate(now.getDate() - (day === 0 ? 6 : day - 1));
-      startOfWeek.setHours(0, 0, 0, 0);
-      return d >= startOfWeek && d <= now;
-    }
-    if (reportPeriod === 'monthly') {
-      // Current calendar month
-      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
-    }
-    return true;
+    
+    // Extract just the date part (YYYY-MM-DD)
+    const dateOnly = dateStr.slice(0, 10);
+    
+    // Compare dates as strings (YYYY-MM-DD format)
+    return dateOnly >= startDate && dateOnly <= endDate;
   };
 
   // ── P&L Calculations ──
-  // Supplier commission = agency revenue (13.6% of goods value)
-  const periodSupplierComm = store.suppliers.reduce((s, sup) =>
+  // Supplier revenue = labour charges + carriage
+  const periodSupplierLabour = store.suppliers.reduce((s, sup) =>
     s + sup.trucks.filter(t => isWithinPeriod(t.loadingDate)).reduce((ss, t) =>
-      ss + calcTruckCommission(t), 0), 0);
+      ss + (t.labourCharges ?? 0), 0), 0);
 
-  // Supplier wari (نقد واری from supplier side)
-  const periodSupplierWari = store.suppliers.reduce((s, sup) =>
+  const periodSupplierCarriage = store.suppliers.reduce((s, sup) =>
     s + sup.trucks.filter(t => isWithinPeriod(t.loadingDate)).reduce((ss, t) =>
-      ss + calcTruckCashWari(t), 0), 0);
+      ss + (t.carriage ?? 0), 0), 0);
 
-  // Customer commission + wari (additional agency income)
+  // Customer revenue = commission + wari
   const periodCustomerComm = store.customers.reduce((s, c) =>
     s + c.sales.filter(sl => isWithinPeriod(sl.date)).reduce((ss, sl) =>
       ss + calcSaleCommission(sl), 0), 0);
@@ -54,8 +45,8 @@ const ReportsModule: React.FC = () => {
     s + c.sales.filter(sl => isWithinPeriod(sl.date)).reduce((ss, sl) =>
       ss + calcSaleCashWari(sl), 0), 0);
 
-  // Total agency revenue = supplier comm + supplier wari + customer comm + customer wari
-  const periodRevenue = periodSupplierComm + periodSupplierWari + periodCustomerComm + periodCustomerWari;
+  // Total agency revenue = supplier revenue + customer revenue
+  const periodRevenue = periodSupplierLabour + periodSupplierCarriage + periodCustomerComm + periodCustomerWari;
 
   const periodTotalPurchases = store.suppliers.reduce((s, sup) =>
     s + sup.trucks.filter(t => isWithinPeriod(t.loadingDate)).reduce((ss, t) =>
@@ -92,38 +83,53 @@ const ReportsModule: React.FC = () => {
   const totalReceivable = customersWithBalance.filter(c => c.balance > 0).reduce((s, x) => s + x.balance, 0);
 
   const handleExportPDF = () => {
-    const periodLabel = getPeriodLabel(
-      reportPeriod === 'daily' ? 'daily' : reportPeriod === 'weekly' ? 'weekly' : 'monthly'
-    );
+    const periodLabel = `${startDate} to ${endDate}`;
 
     if (activeReport === 'pnl') {
-      const salesRows: string[][] = store.customers.flatMap(c =>
+      // Combine supplier and customer transactions
+      const supplierRows: string[][] = store.suppliers.flatMap(sup =>
+        sup.trucks.filter(t => isWithinPeriod(t.loadingDate)).flatMap(t =>
+          t.parties.map(p => [
+            sup.name, t.loadingDate, t.truckNo, String(p.crates),
+            `Rs. ${p.rate.toLocaleString()}`,
+            `Rs. ${(p.crates * p.rate).toLocaleString()}`,
+            `Rs. ${((t.labourCharges ?? 0) / (t.parties.length || 1)).toLocaleString()}`,
+            `Rs. ${((t.carriage ?? 0) / (t.parties.length || 1)).toLocaleString()}`,
+            `Rs. ${((p.crates * p.rate) - ((t.labourCharges ?? 0) / (t.parties.length || 1)) - ((t.carriage ?? 0) / (t.parties.length || 1))).toLocaleString()}`,
+            'Supplier',
+          ])
+        )
+      );
+
+      const customerRows: string[][] = store.customers.flatMap(c =>
         c.sales.filter(s => isWithinPeriod(s.date)).map(s => [
-          c.name, s.date, s.billNo, String(s.crates),
+          c.name, s.date, s.billNo || '', String(s.crates),
           `Rs. ${s.rate.toLocaleString()}`,
           `Rs. ${(s.crates * s.rate).toLocaleString()}`,
           `Rs. ${calcSaleCommission(s).toLocaleString()}`,
           `Rs. ${calcSaleCashWari(s).toLocaleString()}`,
           `Rs. ${calcSaleNet(s).toLocaleString()}`,
-          s.paymentMode,
+          'Customer',
         ])
-      ).sort((a, b) => b[1].localeCompare(a[1]));
+      );
+
+      const salesRows = [...supplierRows, ...customerRows].sort((a, b) => (b[1] || '').localeCompare(a[1] || ''));
 
       openPrintWindow({
         title: 'Profit & Loss Report (منافع و نقصان)',
         subtitle: `Revenue: Rs. ${periodRevenue.toLocaleString()} | Expenses: Rs. ${periodExpenses.toLocaleString()} | Net Profit: Rs. ${periodNetProfit.toLocaleString()}`,
         periodLabel,
         columns: [
-          { label: 'Customer', urdu: 'خریدار' },
+          { label: 'Name', urdu: 'نام' },
           { label: 'Date', urdu: 'تاریخ' },
-          { label: 'Bill No', urdu: 'بل نمبر' },
+          { label: 'Ref No', urdu: 'حوالہ' },
           { label: 'Crates', urdu: 'کریٹس', align: 'right' },
           { label: 'Rate', urdu: 'ریٹ', align: 'right' },
           { label: 'Gross', urdu: 'کل رقم', align: 'right' },
-          { label: 'Commission', urdu: 'کمیشن', align: 'right' },
-          { label: 'Wari', urdu: 'واری', align: 'right' },
-          { label: 'Net Bill', urdu: 'بل', align: 'right' },
-          { label: 'Mode', urdu: 'طریقہ' },
+          { label: 'Labour/Comm', urdu: 'مزدوری/کمیشن', align: 'right' },
+          { label: 'Carriage/Wari', urdu: 'لاگا/واری', align: 'right' },
+          { label: 'Net', urdu: 'خالص', align: 'right' },
+          { label: 'Type', urdu: 'قسم' },
         ],
         rows: salesRows,
         summaryRows: [
@@ -175,7 +181,7 @@ const ReportsModule: React.FC = () => {
         <h1 style={{ margin: 0, fontSize: 22 }}>Abbasi & Co — Tomato Trading</h1>
         <p style={{ margin: '4px 0 0', fontSize: 13 }}>
           {activeReport === 'pnl' ? 'Profit & Loss Report' : 'Remaining Balances'}
-          {' — '}{reportPeriod.charAt(0).toUpperCase() + reportPeriod.slice(1)} | Printed: {new Date().toLocaleDateString()}
+          {' — '}{startDate} to {endDate} | Printed: {new Date().toLocaleDateString()}
         </p>
       </div>
 
@@ -185,10 +191,15 @@ const ReportsModule: React.FC = () => {
           <p>Profit & Loss, Remaining Balances, Cash Flow</p>
         </div>
         <div className="page-actions">
-          <div style={{ display: 'flex', gap: 8, background: 'var(--card-bg)', padding: 4, borderRadius: 8 }}>
-            <button className={`btn ${reportPeriod === 'daily' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setReportPeriod('daily')}>ڈیلی (Daily)</button>
-            <button className={`btn ${reportPeriod === 'weekly' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setReportPeriod('weekly')}>ویکلی (Weekly)</button>
-            <button className={`btn ${reportPeriod === 'monthly' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setReportPeriod('monthly')}>منتھلی (Monthly)</button>
+          <div style={{ display: 'flex', gap: 12, background: 'var(--card-bg)', padding: 12, borderRadius: 8, alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <label style={{ fontSize: '0.85rem', fontWeight: 600 }}>From:</label>
+              <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid var(--border)', fontSize: '0.9rem' }} />
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <label style={{ fontSize: '0.85rem', fontWeight: 600 }}>To:</label>
+              <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid var(--border)', fontSize: '0.9rem' }} />
+            </div>
           </div>
           <button className="btn btn-secondary" onClick={handleExportPDF}>
             <Printer size={16} /> Print Report
@@ -218,7 +229,7 @@ const ReportsModule: React.FC = () => {
               <p style={{ fontSize: '0.7rem', color: 'var(--green)', textTransform: 'uppercase', marginBottom: 4 }}>کل آمدنی (Total Revenue)</p>
               <h3 style={{ margin: 0, color: 'var(--green)' }}>{fmt(periodRevenue)}</h3>
               <p style={{ fontSize: '0.6rem', color: 'var(--text-secondary)', marginTop: 4 }}>
-                Sup.Comm {fmt(periodSupplierComm)} + Wari {fmt(periodSupplierWari)} + Cust.Comm {fmt(periodCustomerComm + periodCustomerWari)}
+                Sup.Labour {fmt(periodSupplierLabour)} + Carriage {fmt(periodSupplierCarriage)} + Cust.Comm {fmt(periodCustomerComm)} + Wari {fmt(periodCustomerWari)}
               </p>
             </div>
             <div className="glass-card" style={{ padding: 20, background: 'rgba(255,59,48,0.05)' }}>
@@ -241,12 +252,12 @@ const ReportsModule: React.FC = () => {
             <div className="glass-card" style={{ padding: 24 }}>
               <h4 style={{ fontSize: '0.9rem', marginBottom: 16 }}>Revenue Breakdown (آمدنی کی تفصیل)</h4>
               <div className="summary-row">
-                <span className="label">Supplier Commission (13.6%)</span>
-                <span className="value green">{fmt(periodSupplierComm)}</span>
+                <span className="label">Supplier Labour (مزدوری)</span>
+                <span className="value green">{fmt(periodSupplierLabour)}</span>
               </div>
               <div className="summary-row">
-                <span className="label">Supplier Wari (نقد واری)</span>
-                <span className="value green">{fmt(periodSupplierWari)}</span>
+                <span className="label">Supplier Carriage (لاگا)</span>
+                <span className="value green">{fmt(periodSupplierCarriage)}</span>
               </div>
               <div className="summary-row">
                 <span className="label">Customer Commission (7.25%)</span>

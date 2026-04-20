@@ -1,5 +1,5 @@
 import React from 'react';
-import { useStore, calcSaleTotal, calcSaleCommission, calcSaleCashWari, calcTruckCashWari, calcSupplierBalance, calcCustomerBalance, calcSupplierGrossTotal, calcSupplierTotalReceived, calcSaleNet, calcTruckCommission } from '../store';
+import { useStore, calcSaleTotal, calcSaleCommission, calcSaleCashWari, calcSupplierBalance, calcCustomerBalance, calcSupplierGrossTotal, calcSupplierTotalReceived, calcSaleNet } from '../store';
 import {
   TrendingUp, DollarSign, Package, Truck, Users,
   BarChart3, Download
@@ -22,18 +22,20 @@ function buildChartData(
   const now = new Date();
 
   const calcDayRevenue = (dateStr: string) => {
-    const supComm = suppliers.reduce((s, sup) =>
-      s + (sup.trucks || []).filter(t => t.loadingDate === dateStr).reduce((ss, t) =>
-        ss + calcTruckCommission(t) + calcTruckCashWari(t), 0), 0);
-    const custComm = customers.reduce((s, c) =>
+    const custRevenue = customers.reduce((s, c) =>
       s + (c.sales || []).filter(sl => sl.date === dateStr).reduce((ss, sl) =>
         ss + calcSaleCommission(sl) + calcSaleCashWari(sl), 0), 0);
-    return supComm + custComm;
+    
+    const supRevenue = suppliers.reduce((s, sup) =>
+      s + (sup.trucks || []).filter(t => t.loadingDate === dateStr).reduce((ss, t) =>
+        ss + (t.labourCharges ?? 0) + (t.carriage ?? 0), 0), 0);
+        
+    return custRevenue + supRevenue;
   };
 
   if (period === 'Today') {
     return Array.from({ length: 24 }, (_, h) => {
-      const dateStr = now.toISOString().split('T')[0];
+      const dateStr = now.toLocaleDateString('en-CA');
       const sales = customers.reduce((s, c) =>
         s + (c.sales || []).filter(sl => sl.date === dateStr).reduce((ss, sl) => ss + sl.crates * sl.rate, 0), 0);
       const purchases = suppliers.reduce((s, sup) =>
@@ -49,7 +51,7 @@ function buildChartData(
     return Array.from({ length: 7 }, (_, i) => {
       const d = new Date(now);
       d.setDate(d.getDate() - (6 - i));
-      const dateStr = d.toISOString().split('T')[0];
+      const dateStr = d.toLocaleDateString('en-CA');
       const sales = customers.reduce((s, c) =>
         s + (c.sales || []).filter(sl => sl.date === dateStr).reduce((ss, sl) => ss + sl.crates * sl.rate, 0), 0);
       const purchases = suppliers.reduce((s, sup) =>
@@ -66,7 +68,7 @@ function buildChartData(
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     return Array.from({ length: daysInMonth }, (_, i) => {
       const d = new Date(year, month, i + 1);
-      const dateStr = d.toISOString().split('T')[0];
+      const dateStr = d.toLocaleDateString('en-CA');
       const sales = customers.reduce((s, c) =>
         s + (c.sales || []).filter(sl => sl.date === dateStr).reduce((ss, sl) => ss + sl.crates * sl.rate, 0), 0);
       const purchases = suppliers.reduce((s, sup) =>
@@ -87,12 +89,12 @@ function buildChartData(
     const purchases = suppliers.reduce((s, sup) =>
       s + (sup.trucks || []).filter(t => { const d = new Date(t.loadingDate); return d.getFullYear() === year && d.getMonth() === m; })
         .reduce((ss, t) => ss + (t.parties || []).reduce((ps, p) => ps + p.crates * p.rate, 0), 0), 0);
-    const revenue = suppliers.reduce((s, sup) =>
-      s + (sup.trucks || []).filter(t => { const d = new Date(t.loadingDate); return d.getFullYear() === year && d.getMonth() === m; })
-        .reduce((ss, t) => ss + calcTruckCommission(t) + calcTruckCashWari(t), 0), 0)
-      + customers.reduce((s, c) =>
-        s + (c.sales || []).filter(sl => { const d = new Date(sl.date); return d.getFullYear() === year && d.getMonth() === m; })
-          .reduce((ss, sl) => ss + calcSaleCommission(sl) + calcSaleCashWari(sl), 0), 0);
+    const revenue = customers.reduce((s, c) =>
+      s + (c.sales || []).filter(sl => { const d = new Date(sl.date); return d.getFullYear() === year && d.getMonth() === m; })
+        .reduce((ss, sl) => ss + calcSaleCommission(sl) + calcSaleCashWari(sl), 0), 0) + 
+      suppliers.reduce((s, sup) =>
+        s + (sup.trucks || []).filter(t => { const d = new Date(t.loadingDate); return d.getFullYear() === year && d.getMonth() === m; })
+          .reduce((ss, t) => ss + (t.labourCharges ?? 0) + (t.carriage ?? 0), 0), 0);
     const exp = expenses.filter(e => { const d = new Date(e.date); return d.getFullYear() === year && d.getMonth() === m; })
       .reduce((s, e) => s + e.amount, 0);
     return { name: months[m], sales, purchases, profit: revenue - exp };
@@ -107,23 +109,36 @@ const Dashboard: React.FC = () => {
     return <div className="glass-card" style={{ padding: 40, textAlign: 'center' }}>Loading dashboard data...</div>;
   }
 
-  const isWithinPeriod = (dateStr: string) => {
-    if (!dateStr) return false;
-    const d = new Date(dateStr);
+  const getPeriodRange = () => {
     const now = new Date();
-    if (filterPeriod === 'Today') return dateStr === now.toISOString().split('T')[0];
+    const current = now.toLocaleDateString('en-CA');
+    
+    if (filterPeriod === 'Today') {
+      return { start: current, end: current };
+    }
     if (filterPeriod === 'This Week') {
       const day = now.getDay();
-      const startOfWeek = new Date(now);
-      startOfWeek.setDate(now.getDate() - (day === 0 ? 6 : day - 1));
-      startOfWeek.setHours(0, 0, 0, 0);
-      return d >= startOfWeek && d <= now;
+      const start = new Date(now);
+      start.setDate(now.getDate() - (day === 0 ? 6 : day - 1));
+      return { start: start.toLocaleDateString('en-CA'), end: current };
     }
     if (filterPeriod === 'This Month') {
-      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+      const start = new Date(now.getFullYear(), now.getMonth(), 1);
+      return { start: start.toLocaleDateString('en-CA'), end: current };
     }
-    if (filterPeriod === 'This Year') return d.getFullYear() === now.getFullYear();
-    return true;
+    if (filterPeriod === 'This Year') {
+      const start = new Date(now.getFullYear(), 0, 1);
+      return { start: start.toLocaleDateString('en-CA'), end: current };
+    }
+    return { start: '1970-01-01', end: '9999-12-31' };
+  };
+
+  const { start: startDate, end: endDate } = getPeriodRange();
+
+  const isWithinPeriod = (dateStr: string) => {
+    if (!dateStr) return false;
+    const dOnly = dateStr.slice(0, 10);
+    return dOnly >= startDate && dOnly <= endDate;
   };
 
   const periodSales = store.customers.reduce((s, c) =>
@@ -133,39 +148,51 @@ const Dashboard: React.FC = () => {
     s + (sup.trucks || []).filter(t => isWithinPeriod(t.loadingDate)).reduce((ss, t) =>
       ss + (t.parties || []).reduce((ps, p) => ps + p.crates * p.rate, 0), 0), 0);
 
-  // Full agency revenue = supplier comm + supplier wari + customer comm + customer wari
-  const periodSupplierComm = store.suppliers.reduce((s, sup) =>
+  // Supplier revenue = labour charges + carriage
+  const periodSupplierLabour = store.suppliers.reduce((s, sup) =>
     s + (sup.trucks || []).filter(t => isWithinPeriod(t.loadingDate)).reduce((ss, t) =>
-      ss + calcTruckCommission(t) + calcTruckCashWari(t), 0), 0);
+      ss + (t.labourCharges ?? 0), 0), 0);
+
+  const periodSupplierCarriage = store.suppliers.reduce((s, sup) =>
+    s + (sup.trucks || []).filter(t => isWithinPeriod(t.loadingDate)).reduce((ss, t) =>
+      ss + (t.carriage ?? 0), 0), 0);
+
   const periodCustomerComm = store.customers.reduce((s, c) =>
     s + (c.sales || []).filter(sl => isWithinPeriod(sl.date)).reduce((ss, sl) =>
-      ss + calcSaleCommission(sl) + calcSaleCashWari(sl), 0), 0);
-  const periodRevenue = periodSupplierComm + periodCustomerComm;
+      ss + calcSaleCommission(sl), 0), 0);
+
+  const periodCustomerWari = store.customers.reduce((s, c) =>
+    s + (c.sales || []).filter(sl => isWithinPeriod(sl.date)).reduce((ss, sl) => ss + calcSaleCashWari(sl), 0), 0);
+
+  const periodRevenue = periodSupplierLabour + periodSupplierCarriage + periodCustomerComm + periodCustomerWari;
 
   const periodExpenses = store.expenses.filter(e => isWithinPeriod(e.date)).reduce((s, e) => s + e.amount, 0);
-  const periodGrossProfit = periodRevenue - periodExpenses;
+  const periodGrossProfit = periodRevenue - periodExpenses; // Gross Profit
+  
+  // Follow AccountsModule logic for period-based net profit
   const periodCharity = Math.round(Math.max(0, periodGrossProfit) * 0.10);
   const periodAfterCharity = periodGrossProfit - periodCharity;
-  // Deduct investor + partner shares
+  
   const periodInvestorShare = Math.round(store.investors.reduce((s, inv) => s + Math.max(0, periodAfterCharity) * inv.sharePercent / 100, 0));
-  const periodPartnerShare = Math.round(store.partners.reduce((s, p) => s + Math.max(0, periodAfterCharity) * p.sharePercent / 100, 0));
-  const periodNetProfit = periodAfterCharity - periodInvestorShare - periodPartnerShare;
+  
+  const periodNetProfit = periodAfterCharity - periodInvestorShare;
 
   const totalSupplierBalance = store.suppliers.reduce((s, sp) => s + calcSupplierBalance(sp), 0);
   const totalCustomerBalance = store.customers.reduce((s, c) => s + calcCustomerBalance(c), 0);
   const totalCrates = store.suppliers.reduce((s, sp) =>
     s + (sp.trucks || []).reduce((ss, t) => ss + (t.parties || []).reduce((ps, p) => ps + p.crates, 0), 0), 0);
+  const truckCount = store.suppliers.reduce((s, sup) => 
+    s + (sup.trucks || []).filter(t => isWithinPeriod(t.loadingDate)).length, 0);
 
   const stats = [
-    { label: 'کل فروخت (Total Sales)', value: fmt(periodSales), icon: TrendingUp, color: 'blue', sub: `${store.customers.length} customers` },
-    { label: 'کل خریداری (Total Purchases)', value: fmt(periodPurchases), icon: Truck, color: 'indigo', sub: `${store.suppliers.reduce((s, sp) => s + (sp.trucks || []).length, 0)} trucks` },
-    { label: 'کل آمدنی (Total Revenue)', value: fmt(periodRevenue), icon: DollarSign, color: 'green', sub: 'Comm + Wari (Sup + Cust)' },
+    { label: 'کل فروخت (Total Sales)', value: fmt(periodSales), icon: TrendingUp, color: 'blue', sub: 'Gross goods value' },
+    { label: 'کل خریداری (Total Purchases)', value: fmt(periodPurchases), icon: Truck, color: 'indigo', sub: `${truckCount} Trucks in period` },
+    { label: 'کل آمدنی (Total Revenue)', value: fmt(periodRevenue), icon: DollarSign, color: 'green', sub: 'Agency Income (Net)' },
     { label: 'خالص منافع (Net Profit)', value: fmt(periodNetProfit), icon: BarChart3, color: periodNetProfit >= 0 ? 'green' : 'red', sub: 'After expenses, charity & shares' },
   ];
 
   const chartData = buildChartData(filterPeriod, store.customers, store.suppliers, store.expenses);
 
-  // Sort by highest gross total / balance
   const topSuppliers = [...store.suppliers]
     .sort((a, b) => calcSupplierGrossTotal(b) - calcSupplierGrossTotal(a))
     .slice(0, 5)
@@ -189,23 +216,22 @@ const Dashboard: React.FC = () => {
     }));
 
   const handleExportSuppliers = () => {
-    const headers = ['Supplier Name', 'Type', 'Date', 'Ref/Truck No', 'Goods Owner/Method', 'Crates', 'Rate', 'Gross Amount', 'Commission', 'Wari', 'Advance', 'Carriage', 'Net Goods (Credit)', 'Paid/Expense (Debit)'];
+    const headers = ['Supplier Name', 'Type', 'Date', 'Ref/Truck No', 'Goods Owner/Method', 'Crates', 'Rate', 'Gross Amount', 'Labour', 'Carriage', 'Advance', 'Net Payable', 'Paid/Expense (Debit)'];
     const data = store.suppliers.flatMap(sup => {
       const allRows: any[] = [];
       (sup.trucks || []).forEach(truck => {
         const totalCratesT = (truck.parties || []).reduce((sum, p) => sum + p.crates, 0);
         (truck.parties || []).forEach((party, idx) => {
           const gross = party.crates * party.rate;
-          const comm = Math.round(gross * (truck.commPercent ?? 13.6) / 100);
-          const wari = party.crates * (truck.wariRate ?? 10);
           const share = totalCratesT > 0 ? party.crates / totalCratesT : 0;
+          const allocatedLabour = Math.round((truck.labourCharges ?? 0) * share);
           const allocatedCarriage = Math.round(truck.carriage * share);
-          const net = gross - comm - wari - allocatedCarriage;
-          allRows.push([sup.name, 'Goods', truck.loadingDate, truck.truckNo, party.personName, party.crates, party.rate, gross, comm, wari, idx === 0 ? truck.advance : 0, allocatedCarriage, net, 0]);
+          const net = gross - allocatedLabour - allocatedCarriage;
+          allRows.push([sup.name, 'Goods', truck.loadingDate, truck.truckNo, party.personName, party.crates, party.rate, gross, allocatedLabour, allocatedCarriage, idx === 0 ? truck.advance : 0, net, 0]);
         });
       });
       (sup.payments || []).forEach(p => {
-        allRows.push([sup.name, 'Payment', p.date, p.method, 'General Payment', '', '', '', '', '', '', '', 0, p.amount]);
+        allRows.push([sup.name, 'Payment', p.date, p.method, 'General Payment', '', '', '', '', '', '', '', p.amount]);
       });
       return allRows;
     }).sort((a, b) => new Date(a[2] as string).getTime() - new Date(b[2] as string).getTime());
@@ -243,7 +269,6 @@ const Dashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* ── Stats ── */}
       <div className="stats-grid">
         {stats.map((stat, i) => (
           <div key={i} className={`stat-card ${stat.color}`}>
@@ -261,7 +286,6 @@ const Dashboard: React.FC = () => {
         ))}
       </div>
 
-      {/* ── Quick Info Cards ── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 24 }}>
         <div className="glass-card" style={{ padding: 20, display: 'flex', alignItems: 'center', gap: 16 }}>
           <div className="stat-icon purple"><Truck size={20} /></div>
@@ -286,7 +310,6 @@ const Dashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* ── Charts ── */}
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 20, marginBottom: 24 }}>
         <div className="glass-card" style={{ padding: 24 }}>
           <h3 style={{ fontSize: '1rem', marginBottom: 20 }}>Sales vs Purchases (خرید و فروخت)</h3>
@@ -327,7 +350,6 @@ const Dashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* ── Tables ── */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
         <div className="glass-card" style={{ overflow: 'hidden' }}>
           <div className="table-header">

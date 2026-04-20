@@ -16,9 +16,10 @@ const CustomerModule: React.FC = () => {
   const [isAddingEntry, setIsAddingEntry] = useState(false);
   const [editMode, setEditMode] = useState<'customer' | 'sale' | 'payment' | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   const [newEntry, setNewEntry] = useState({
-    name: '', phone: '', nickname: '',
+    name: '', phone: '', nickname: '', address: '',
     commPercent: CUSTOMER_COMMISSION_PERCENT, wariRate: CASH_WARI_CUSTOMER,
   });
 
@@ -26,12 +27,12 @@ const CustomerModule: React.FC = () => {
   const [purchases, setPurchases] = useState([{
     id: Math.random().toString(),
     date: new Date().toISOString().split('T')[0],
-    crates: 0, totalValue: 0, billNo: '',
+    crates: 0, rate: 0, totalValue: 0, billNo: '',
     advance: 0, advanceMethod: 'Cash' as 'Cash' | 'Credit',
     discount: 0, paymentMode: 'Credit' as 'Cash' | 'Credit',
   }]);
 
-  const [entryPayments, setEntryPayments] = useState([{ id: Math.random().toString(), amount: 0, date: new Date().toISOString().split('T')[0], method: 'Cash' as 'Cash' | 'Credit' | 'Bank' }]);
+  const [entryPayments, setEntryPayments] = useState([{ id: Math.random().toString(), amount: 0, date: new Date().toISOString().split('T')[0], method: 'Cash' as 'Cash' | 'Online' | 'Credit' | 'Bank', accountNo: '', accountHolderName: '' }]);
 
   // Return modal state
   const [returnModal, setReturnModal] = useState<{ open: boolean; editing: CustomerReturn | null }>({ open: false, editing: null });
@@ -46,29 +47,114 @@ const CustomerModule: React.FC = () => {
 
   const handleAddEntry = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSaving) return;
+    setIsSaving(true);
+    console.log('[handleAddEntry] editMode:', editMode, 'editingId:', editingId, 'selectedCustomerId:', selectedCustomerId);
 
-    if (editMode && editingId) {
-      if (editMode === 'customer') {
-        store.updateCustomer(editingId, { name: newEntry.name, phone: newEntry.phone, nickname: newEntry.nickname });
-        
-        // Update associated payments
-        const c = store.customers.find(cust => cust.id === editingId);
-        entryPayments.forEach(p => {
-          if (p.amount > 0) {
-            const existing = c?.payments.find(ep => ep.id === p.id);
-            if (existing) {
-              store.updateCustomerPayment(editingId, p.id, { amount: p.amount, date: p.date, method: p.method as any });
-            } else {
-              store.addPaymentToCustomer(editingId, { amount: p.amount, date: p.date, method: p.method as any });
+    try {
+      if (editMode && editingId) {
+        if (editMode === 'customer') {
+          console.log('[handleAddEntry] updating customer:', editingId, 'purchases[0]:', purchases[0]);
+          await store.updateCustomer(editingId, { name: newEntry.name, phone: newEntry.phone, nickname: newEntry.nickname });
+
+          // Update the sale if it came from an existing sale (id matches a real sale)
+          const c = store.customers.find(cust => cust.id === editingId);
+          const p0 = purchases[0];
+          const existingSale = c?.sales.find(s => s.id === p0.id);
+          if (existingSale) {
+            await store.updateCustomerSale(editingId, p0.id, {
+              date: p0.date,
+              crates: Number(p0.crates),
+              rate: Number(p0.rate),
+              billNo: p0.billNo,
+              commPercent: Number(newEntry.commPercent),
+              wariRate: Number(newEntry.wariRate),
+              advance: Number(p0.advance),
+              advanceMethod: p0.advanceMethod,
+              discount: Number(p0.discount),
+              paymentMode: p0.paymentMode,
+            });
+          }
+
+          // Update associated payments
+          for (const p of entryPayments) {
+            if (p.amount > 0) {
+              const existing = c?.payments.find(ep => ep.id === p.id);
+              if (existing) {
+                await store.updateCustomerPayment(editingId, p.id, { amount: p.amount, date: p.date, method: p.method as any, accountNo: p.accountNo, accountHolderName: p.accountHolderName });
+              } else {
+                await store.addPaymentToCustomer(editingId, { amount: p.amount, date: p.date, method: p.method as any, accountNo: p.accountNo, accountHolderName: p.accountHolderName });
+              }
             }
           }
-        });
-      } else if (editMode === 'sale' && editingId && selectedCustomerId) {
-        const p = purchases[0];
-        store.updateCustomerSale(selectedCustomerId, editingId, {
+        } else if (editMode === 'sale' && editingId && selectedCustomerId) {
+          const p = purchases[0];
+          console.log('[handleAddEntry] updating sale:', editingId, 'for customer:', selectedCustomerId, 'data:', p);
+          await store.updateCustomerSale(selectedCustomerId, editingId, {
+            date: p.date,
+            crates: Number(p.crates),
+            rate: Number(p.rate),
+            billNo: p.billNo,
+            commPercent: Number(newEntry.commPercent),
+            wariRate: Number(newEntry.wariRate),
+            advance: Number(p.advance),
+            advanceMethod: p.advanceMethod,
+            discount: Number(p.discount),
+            paymentMode: p.paymentMode,
+          });
+          await store.updateCustomer(selectedCustomerId, { name: newEntry.name, phone: newEntry.phone, nickname: newEntry.nickname });
+
+          // Also handle payments added during sale edit
+          const c = store.customers.find(cust => cust.id === selectedCustomerId);
+          for (const p of entryPayments) {
+            if (p.amount > 0) {
+              const existing = c?.payments.find(ep => ep.id === p.id);
+              if (existing) {
+                await store.updateCustomerPayment(selectedCustomerId, p.id, { amount: p.amount, date: p.date, method: p.method as any, accountNo: p.accountNo, accountHolderName: p.accountHolderName });
+              } else {
+                await store.addPaymentToCustomer(selectedCustomerId, { amount: p.amount, date: p.date, method: p.method as any, accountNo: p.accountNo, accountHolderName: p.accountHolderName });
+              }
+            }
+          }
+        } else if (editMode === 'payment') {
+          const ownerCustomer = editingId
+            ? store.customers.find(c => c.payments.some(p => p.id === editingId))
+            : selectedCustomer;
+          const ownerId = ownerCustomer?.id ?? selectedCustomerId;
+          if (ownerId && entryPayments[0].amount > 0) {
+            if (editingId) {
+              // Editing existing payment
+              await store.updateCustomerPayment(ownerId, editingId, {
+                amount: Number(entryPayments[0].amount),
+                date: entryPayments[0].date,
+                method: entryPayments[0].method as any,
+                accountNo: entryPayments[0].accountNo,
+                accountHolderName: entryPayments[0].accountHolderName,
+              });
+            } else {
+              // Adding new payment
+              await store.addPaymentToCustomer(ownerId, {
+                amount: Number(entryPayments[0].amount),
+                date: entryPayments[0].date,
+                method: entryPayments[0].method as any,
+                accountNo: entryPayments[0].accountNo,
+                accountHolderName: entryPayments[0].accountHolderName,
+              });
+            }
+          }
+        }
+      } else {
+        // New entry flow
+        const customerData = { name: newEntry.name, phone: newEntry.phone, nickname: newEntry.nickname };
+        const existing = store.customers.find(c =>
+          c.name.trim().toLowerCase() === newEntry.name.trim().toLowerCase() &&
+          c.nickname.trim().toLowerCase() === newEntry.nickname.trim().toLowerCase()
+        );
+
+        const allSales = purchases.map(p => ({
           date: p.date,
           crates: Number(p.crates),
-          rate: Number(p.crates) > 0 ? Number(p.totalValue) / Number(p.crates) : 0,
+          rate: Number(p.rate),
           billNo: p.billNo,
           commPercent: Number(newEntry.commPercent),
           wariRate: Number(newEntry.wariRate),
@@ -76,97 +162,48 @@ const CustomerModule: React.FC = () => {
           advanceMethod: p.advanceMethod,
           discount: Number(p.discount),
           paymentMode: p.paymentMode,
-        });
-      store.updateCustomer(selectedCustomerId, { name: newEntry.name, phone: newEntry.phone, nickname: newEntry.nickname });
+        }));
 
-        // Also handle payments added during sale edit
-        const c = store.customers.find(cust => cust.id === selectedCustomerId);
-        entryPayments.forEach(p => {
-          if (p.amount > 0) {
-            const existing = c?.payments.find(ep => ep.id === p.id);
-            if (existing) {
-              store.updateCustomerPayment(selectedCustomerId, p.id, { amount: p.amount, date: p.date, method: p.method as any });
-            } else {
-              store.addPaymentToCustomer(selectedCustomerId, { amount: p.amount, date: p.date, method: p.method as any });
+        if (existing) {
+          for (const sale of allSales) {
+            await store.addSaleToCustomer(existing.id, sale);
+          }
+          // Also handle payments added during new entry
+          for (const p of entryPayments) {
+            if (p.amount > 0) {
+              await store.addPaymentToCustomer(existing.id, { amount: p.amount, date: p.date, method: p.method as any, accountNo: p.accountNo, accountHolderName: p.accountHolderName });
             }
           }
-        });
-      } else if (editMode === 'payment') {
-        const ownerCustomer = editingId
-          ? store.customers.find(c => c.payments.some(p => p.id === editingId))
-          : selectedCustomer;
-        const ownerId = ownerCustomer?.id ?? selectedCustomerId;
-        if (ownerId && entryPayments[0].amount > 0) {
-          if (editingId) {
-            // Editing existing payment
-            store.updateCustomerPayment(ownerId, editingId, {
-              amount: Number(entryPayments[0].amount),
-              date: entryPayments[0].date,
-              method: entryPayments[0].method as any,
-            });
-          } else {
-            // Adding new payment
-            store.addPaymentToCustomer(ownerId, {
-              amount: Number(entryPayments[0].amount),
-              date: entryPayments[0].date,
-              method: entryPayments[0].method as any,
-            });
+        } else {
+          const customerId = await store.addCustomerWithFirstSale(customerData, allSales[0], entryPayments.filter(p => p.amount > 0) as any);
+          if (customerId && allSales.length > 1) {
+            for (const sale of allSales.slice(1)) {
+              await store.addSaleToCustomer(customerId, sale);
+            }
           }
         }
       }
-    } else {
-      // New entry — save ALL purchases together
-      const customerData = { name: newEntry.name, phone: newEntry.phone, nickname: newEntry.nickname };
-
-      // Check if customer already exists
-      const existing = store.customers.find(c =>
-        c.name.trim().toLowerCase() === newEntry.name.trim().toLowerCase() &&
-        c.nickname.trim().toLowerCase() === newEntry.nickname.trim().toLowerCase()
-      );
-
-      const allSales = purchases.map(p => ({
-        date: p.date,
-        crates: Number(p.crates),
-        rate: Number(p.crates) > 0 ? Number(p.totalValue) / Number(p.crates) : 0,
-        billNo: p.billNo,
-        commPercent: Number(newEntry.commPercent),
-        wariRate: Number(newEntry.wariRate),
-        advance: Number(p.advance),
-        advanceMethod: p.advanceMethod,
-        discount: Number(p.discount),
-        paymentMode: p.paymentMode,
-      }));
-
-      if (existing) {
-        // Add all purchases to existing customer
-        for (const sale of allSales) {
-          await store.addSaleToCustomer(existing.id, sale);
-        }
-      } else {
-        // Create new customer with first sale, then add rest
-        const customerId = await store.addCustomerWithFirstSale(customerData, allSales[0], []);
-        if (customerId && allSales.length > 1) {
-          for (const sale of allSales.slice(1)) {
-            await store.addSaleToCustomer(customerId, sale);
-          }
-        }
-      }
+      resetForm();
+    } catch (err) {
+      console.error('Failed to save customer entry:', err);
+      alert('Failed to save. Please check your connection and try again.');
+    } finally {
+      setIsSaving(false);
     }
-    resetForm();
   };
 
   const resetForm = () => {
     setNewEntry({
-      name: '', phone: '', nickname: '',
+      name: '', phone: '', nickname: '', address: '',
       commPercent: CUSTOMER_COMMISSION_PERCENT, wariRate: CASH_WARI_CUSTOMER,
     });
     setPurchases([{
       id: Math.random().toString(),
       date: new Date().toISOString().split('T')[0],
-      crates: 0, totalValue: 0, billNo: store.getNextBillNo(),
+      crates: 0, rate: 0, totalValue: 0, billNo: store.getNextBillNo(),
       advance: 0, advanceMethod: 'Cash', discount: 0, paymentMode: 'Credit',
     }]);
-    setEntryPayments([{ id: Math.random().toString(), amount: 0, date: new Date().toISOString().split('T')[0], method: 'Cash' }]);
+    setEntryPayments([{ id: Math.random().toString(), amount: 0, date: new Date().toISOString().split('T')[0], method: 'Cash', accountNo: '', accountHolderName: '' }]);
     setIsAddingEntry(false);
     setEditMode(null);
     setEditingId(null);
@@ -180,15 +217,16 @@ const CustomerModule: React.FC = () => {
   const openAddPurchase = (c: Customer) => {
     resetForm();
     setNewEntry({
-      name: c.name, phone: c.phone || '', nickname: c.nickname || '',
+      name: c.name, phone: c.phone || '', nickname: c.nickname || '', address: c.address || '',
       commPercent: CUSTOMER_COMMISSION_PERCENT, wariRate: CASH_WARI_CUSTOMER,
     });
     setIsAddingEntry(true);
   };
 
   const openEditCustomer = (c: Customer) => {
+    resetForm();
     setNewEntry({
-      name: c.name, phone: c.phone || '', nickname: c.nickname || '',
+      name: c.name, phone: c.phone || '', nickname: c.nickname || '', address: c.address || '',
       commPercent: c.sales[0]?.commPercent ?? CUSTOMER_COMMISSION_PERCENT,
       wariRate: c.sales[0]?.wariRate ?? CASH_WARI_CUSTOMER,
     });
@@ -196,6 +234,7 @@ const CustomerModule: React.FC = () => {
       id: c.sales[0].id,
       date: c.sales[0].date,
       crates: c.sales[0].crates,
+      rate: c.sales[0].rate,
       totalValue: c.sales[0].crates * c.sales[0].rate,
       billNo: c.sales[0].billNo || '',
       advance: c.sales[0].advance ?? 0,
@@ -205,46 +244,18 @@ const CustomerModule: React.FC = () => {
     }] : [{
       id: Math.random().toString(),
       date: new Date().toISOString().split('T')[0],
-      crates: 0, totalValue: 0, billNo: '',
+      crates: 0, rate: 0, totalValue: 0, billNo: '',
       advance: 0, advanceMethod: 'Cash' as const, discount: 0, paymentMode: 'Credit' as const,
     }]);
 
     if (c.payments.length > 0) {
-      setEntryPayments(c.payments.map(p => ({ id: p.id, amount: p.amount, date: p.date, method: p.method })));
+      setEntryPayments(c.payments.map(p => ({ id: p.id, amount: p.amount, date: p.date, method: p.method, accountNo: p.accountNo || '', accountHolderName: p.accountHolderName || '' })));
     } else {
-      setEntryPayments([{ id: Math.random().toString(), amount: 0, date: new Date().toISOString().split('T')[0], method: 'Cash' }]);
+      setEntryPayments([{ id: Math.random().toString(), amount: 0, date: new Date().toISOString().split('T')[0], method: 'Cash', accountNo: '', accountHolderName: '' }]);
     }
 
     setEditMode('customer');
     setEditingId(c.id);
-    setIsAddingEntry(true);
-  };
-
-  const openEditSale = (s: CustomerSale) => {
-    const parent = store.customers.find(c => c.sales.some(x => x.id === s.id));
-    setNewEntry({
-      name: parent?.name || '', phone: parent?.phone || '', nickname: parent?.nickname || '',
-      commPercent: s.commPercent ?? CUSTOMER_COMMISSION_PERCENT,
-      wariRate: s.wariRate ?? CASH_WARI_CUSTOMER,
-    });
-    setPurchases([{
-      id: s.id,
-      date: s.date, crates: s.crates, totalValue: s.crates * s.rate,
-      billNo: s.billNo,
-      advance: s.advance ?? 0,
-      advanceMethod: (s.advanceMethod as 'Cash' | 'Credit') ?? 'Cash',
-      discount: s.discount ?? 0,
-      paymentMode: (s.paymentMode as 'Cash' | 'Credit') ?? 'Credit',
-    }]);
-
-    if (parent && parent.payments.length > 0) {
-      setEntryPayments(parent.payments.map(p => ({ id: p.id, amount: p.amount, date: p.date, method: p.method })));
-    } else {
-      setEntryPayments([{ id: Math.random().toString(), amount: 0, date: new Date().toISOString().split('T')[0], method: 'Cash' }]);
-    }
-
-    setEditMode('sale');
-    setEditingId(s.id);
     setIsAddingEntry(true);
   };
 
@@ -263,10 +274,10 @@ const CustomerModule: React.FC = () => {
       name: parent?.name || '',
       phone: parent?.phone || '',
       nickname: parent?.nickname || '',
-      date: '', crates: 0, totalValue: 0, billNo: '',
+      address: parent?.address || '',
       commPercent: CUSTOMER_COMMISSION_PERCENT, wariRate: CASH_WARI_CUSTOMER,
-      advance: 0, advanceMethod: 'Cash' as 'Cash' | 'Credit', discount: 0, paymentMode: 'Credit' as 'Cash' | 'Credit'    });
-    setEntryPayments([{ id: p.id, amount: p.amount, date: p.date, method: p.method }]);
+    });
+    setEntryPayments([{ id: p.id, amount: p.amount, date: p.date, method: p.method, accountNo: p.accountNo || '', accountHolderName: p.accountHolderName || '' }]);
     // Make sure selectedCustomerId is set so the save handler can find the customer
     if (parent && !selectedCustomerId) setSelectedCustomerId(parent.id);
     setEditMode('payment');
@@ -386,11 +397,11 @@ const CustomerModule: React.FC = () => {
         const net = gross + comm + wari;
         const adv = s.advance ?? 0;
         return [
-          cust.name, cust.nickname || '', cust.phone || '',
-          s.date, s.billNo, String(s.crates),
+          cust.name, cust.nickname || '', cust.phone || '--',
+          s.date, s.billNo || '', String(s.crates),
           rs(s.rate), rs(gross), rs(comm), rs(wari),
           rs(net), adv > 0 ? rs(adv) : '--',
-          rs(net - adv), s.paymentMode,
+          rs(net - adv), s.paymentMode || '',
         ];
       })
     );
@@ -445,10 +456,10 @@ const CustomerModule: React.FC = () => {
       const net = gross + comm + wari;
       const adv = s.advance ?? 0;
       return [
-        s.date, s.billNo, String(s.crates),
+        s.date, s.billNo || '', String(s.crates),
         rs(s.rate), rs(gross), rs(comm), rs(wari),
         rs(net), adv > 0 ? rs(adv) : '--',
-        rs(net - adv), s.paymentMode,
+        rs(net - adv), s.paymentMode || '',
       ];
     });
 
@@ -501,6 +512,13 @@ const CustomerModule: React.FC = () => {
 
   const fmt = (n: number) => `Rs. ${n.toLocaleString()}`;
 
+  const filteredCustomers = store.customers.filter(c => {
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    if (c.name.toLowerCase().includes(q) || (c.phone && c.phone.includes(q)) || (c.nickname && c.nickname.toLowerCase().includes(q))) return true;
+    return false;
+  });
+
   if (view === 'detail' && selectedCustomer) {
     const totalBalance = calcCustomerBalance(selectedCustomer);
     const summaryTotalCrates = selectedCustomer.sales.reduce((s, x) => s + x.crates, 0);
@@ -518,66 +536,114 @@ const CustomerModule: React.FC = () => {
         <div className="content-grid cols-3" style={{ marginBottom: 24 }}>
           <div className="glass-card" style={{ padding: 24, gridColumn: 'span 2' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-              <h3 style={{ fontSize: '1rem' }}>Sales Records (خریداری ڈیٹا)</h3>
+              <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--text-primary)' }}>Sales Records (خریداری ڈیٹا)</h3>
+              <div style={{ display: 'flex', gap: 12 }}>
+                <span style={{ fontSize: '0.85rem', padding: '6px 12px', background: 'rgba(37, 99, 235, 0.1)', color: 'var(--blue)', borderRadius: 20, fontWeight: 600 }}>
+                  {filteredCustomers.find(c => c.id === selectedCustomerId)?.sales.length || 0} Records
+                </span>
+              </div>
             </div>
             <div className="table-wrapper">
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th>Date (تاریخ)</th>
-                    <th>Mode (طریقہ)</th>
-                    <th>Crates (کریٹس)</th>
-                    <th>Rate (ریٹ فی کریٹ)</th>
-                    <th>Gross Total (کل رقم)</th>
-                    <th>Commission (کمیشن)</th>
-                    <th>Cash Wari (نقد واری)</th>
-                    <th>Net Bill (بل)</th>
-                    <th>Discount (رعایت)</th>
-                    <th>Advance (بیانہ)</th>
-                    <th>Actions</th>
+                    <th style={{ width: '120px' }}>Date & Mode</th>
+                    <th>Crates & Rate</th>
+                    <th className="text-right">Gross Total</th>
+                    <th className="text-right">Taxes (Comm/Wari)</th>
+                    <th className="text-right">Net Bill</th>
+                    <th className="text-right">Advance/Disc</th>
+                    <th style={{ width: '100px' }} className="text-center">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {selectedCustomer.sales.map(sale => (
-                    <tr key={sale.id}>
-                      <td style={{ color: 'var(--text-secondary)' }}>{sale.date}</td>
-                      <td>
-                        {sale.paymentMode === 'Cash'
-                          ? <span className="badge orange">نقد (Cash)</span>
-                          : <span className="badge blue">ادھار (Credit)</span>}
-                      </td>
-                      <td style={{ fontWeight: 500 }}>{sale.crates}</td>
-                      <td>{fmt(sale.rate)}</td>
-                      <td>{fmt(calcSaleTotal(sale))}</td>
-                      <td style={{ color: 'var(--red)' }}>+{fmt(calcSaleCommission(sale))}</td>
-                      <td style={{ color: 'var(--red)' }}>+{fmt(calcSaleCashWari(sale))}</td>
-                      <td style={{ fontWeight: 600, color: 'var(--blue)' }}>{fmt(calcSaleNet(sale))}</td>
-                      <td style={{ color: (sale.discount ?? 0) > 0 ? 'var(--orange)' : 'var(--text-secondary)' }}>
-                        {(sale.discount ?? 0) > 0 ? `-${fmt(sale.discount!)}` : '--'}
-                      </td>
-                      <td style={{ color: (sale.advance ?? 0) > 0 ? 'var(--green)' : 'var(--text-secondary)' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <span>{(sale.advance ?? 0) > 0 ? `-${fmt(sale.advance!)}` : '--'}</span>
-                          {(sale.advance ?? 0) > 0 && (
-                            <span style={{ fontSize: '0.65rem', color: 'var(--text-tertiary)' }}>
-                              [{sale.advanceMethod ?? 'Cash'}]
-                            </span>
+                  {selectedCustomer.sales.map(sale => {
+                    const gross = calcSaleTotal(sale);
+                    const comm = calcSaleCommission(sale);
+                    const wari = calcSaleCashWari(sale);
+                    const net = calcSaleNet(sale);
+                    const disc = sale.discount ?? 0;
+                    const adv = sale.advance ?? 0;
+                    
+                    return (
+                      <tr key={sale.id} className="hover-row">
+                        <td>
+                          <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{sale.date}</div>
+                          <div style={{ fontSize: '0.75rem' }}>
+                            {sale.paymentMode === 'Cash' 
+                              ? <span style={{ color: 'var(--orange)' }}>● Cash (نقد)</span> 
+                              : <span style={{ color: 'var(--blue)' }}>● Credit (ادھار)</span>}
+                          </div>
+                        </td>
+                        <td>
+                          <div style={{ fontWeight: 600 }}>{sale.crates} Crates</div>
+                          <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>@ {fmt(sale.rate)}</div>
+                        </td>
+                        <td className="text-right" style={{ fontWeight: 500 }}>{fmt(gross)}</td>
+                        <td className="text-right">
+                          <div style={{ fontSize: '0.85rem', color: 'var(--red)' }}>+{fmt(comm)} <span style={{ fontSize: '0.7rem' }}>(Comm)</span></div>
+                          <div style={{ fontSize: '0.85rem', color: 'var(--red)' }}>+{fmt(wari)} <span style={{ fontSize: '0.7rem' }}>(Wari)</span></div>
+                        </td>
+                        <td className="text-right">
+                          <div style={{ fontWeight: 700, color: 'var(--blue)', fontSize: '0.95rem' }}>{fmt(net)}</div>
+                          {sale.billNo && <div style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)' }}>Bill: {sale.billNo}</div>}
+                        </td>
+                        <td className="text-right">
+                          {adv > 0 && (
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6, color: 'var(--green)', fontSize: '0.85rem' }}>
+                              <span>-{fmt(adv)} <span style={{ fontSize: '0.7rem' }}>(Adv - {sale.advanceMethod})</span></span>
+                              <button type="button" className="topbar-icon-btn" title="Edit Advance" onClick={() => openEditAdvance(sale)} style={{ cursor: 'pointer', padding: 2 }}>
+                                <Edit2 size={10} />
+                              </button>
+                            </div>
                           )}
-                          <button className="topbar-icon-btn" title="Edit Advance" onClick={() => openEditAdvance(sale)}>
-                            <Edit2 size={11} />
-                          </button>
-                        </div>
-                      </td>
-                      <td>
-                        <div style={{ display: 'flex', gap: 6 }}>
-                          <button className="topbar-icon-btn" onClick={() => openEditSale(sale)}><Edit2 size={14} /></button>
-                          <button className="topbar-icon-btn" style={{ color: 'var(--red)' }} onClick={() => { if (confirm('Delete this sale?')) store.deleteCustomerSale(selectedCustomerId!, sale.id) }}><Trash2 size={14} /></button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                          {disc > 0 && <div style={{ fontSize: '0.85rem', color: 'var(--orange)' }}>-{fmt(disc)} <span style={{ fontSize: '0.7rem' }}>(Disc)</span></div>}
+                          {adv === 0 && (
+                            <button type="button" className="topbar-icon-btn" title="Add Advance" onClick={() => openEditAdvance(sale)} style={{ cursor: 'pointer', opacity: 0.3 }}>
+                              + Adv
+                            </button>
+                          )}
+                        </td>
+                        <td className="text-center">
+                          <div className="action-group" style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
+                            <button className="btn btn-secondary" style={{ padding: 6 }} title="Edit Sale" onClick={() => {
+                              setNewEntry({
+                                name: selectedCustomer?.name || '', 
+                                phone: selectedCustomer?.phone || '', 
+                                nickname: selectedCustomer?.nickname || '', 
+                                address: selectedCustomer?.address || '',
+                                commPercent: sale.commPercent ?? CUSTOMER_COMMISSION_PERCENT,
+                                wariRate: sale.wariRate ?? CASH_WARI_CUSTOMER,
+                              });
+                              setPurchases([{
+                                id: sale.id,
+                                date: sale.date, 
+                                crates: sale.crates, 
+                                rate: sale.rate,
+                                totalValue: sale.crates * sale.rate,
+                                billNo: sale.billNo,
+                                advance: sale.advance ?? 0,
+                                advanceMethod: (sale.advanceMethod as 'Cash' | 'Credit') ?? 'Cash',
+                                discount: sale.discount ?? 0,
+                                paymentMode: (sale.paymentMode as 'Cash' | 'Credit') ?? 'Credit',
+                              }]);
+                              setEntryPayments([{ id: Math.random().toString(), amount: 0, date: new Date().toISOString().split('T')[0], method: 'Cash', accountNo: '', accountHolderName: '' }]);
+                              setEditMode('sale');
+                              setEditingId(sale.id);
+                              setIsAddingEntry(true);
+                            }}>
+                              <Edit2 size={12} />
+                            </button>
+                            <button className="btn btn-secondary" style={{ padding: 6, color: 'var(--red)' }} title="Delete Sale" onClick={() => { if (confirm('Delete this sale?')) store.deleteCustomerSale(selectedCustomerId!, sale.id) }}>
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                   {selectedCustomer.sales.length === 0 && (
-                    <tr><td colSpan={11} className="empty-state">No sales added yet</td></tr>
+                    <tr><td colSpan={7} className="empty-state">No sales added yet</td></tr>
                   )}
                 </tbody>
               </table>
@@ -628,7 +694,10 @@ const CustomerModule: React.FC = () => {
                 <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: 8 }}>
                   {totalBalance > 0 ? '⚠ Receivable from Customer' : '✓ Customer is Clear'}
                 </p>
-                <button className="btn btn-secondary" style={{ width: '100%' }} onClick={openNewPayment}>
+                <button className="btn btn-primary" style={{ width: '100%' }} onClick={() => openAddPurchase(selectedCustomer)}>
+                  <Plus size={16} /> نیا خریداری (New Purchase)
+                </button>
+                <button className="btn btn-secondary" style={{ width: '100%', marginTop: 8 }} onClick={openNewPayment}>
                   <DollarSign size={16} /> نئی ادائیگی (New Payment)
                 </button>
                 <button className="btn btn-secondary" style={{ width: '100%', marginTop: 8 }} onClick={openAddReturn}>
@@ -760,6 +829,191 @@ const CustomerModule: React.FC = () => {
           </div>
         )}
 
+        {/* ── Edit Sale / Entry Modal (from detail view) ── */}
+        {isAddingEntry && (
+          <div className="modal-overlay">
+            <div className="modal-content" style={{ maxWidth: 700 }}>
+              <div className="modal-header">
+                <h3>{editMode === 'customer' ? 'Edit Customer' : editMode === 'sale' ? 'Edit Sale' : editMode === 'payment' ? 'Edit Payment' : newEntry.name ? `Add Purchase — ${newEntry.name}` : 'New Entry'}</h3>
+                <button className="topbar-icon-btn" onClick={resetForm}><X size={18} /></button>
+              </div>
+              <form onSubmit={handleAddEntry}>
+                <div className="modal-body">
+                  <h4 style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', textTransform: 'uppercase', marginBottom: 16 }}>1-3. خریدار پروفائل (Customer Profile)</h4>
+                  <div className="form-grid cols-2">
+                    <div className="form-group">
+                      <label>1. نام خریدار / Buyer Name *</label>
+                      <input className="form-control" required value={newEntry.name} onChange={e => setNewEntry({ ...newEntry, name: e.target.value })} readOnly={editMode === 'payment' && !!selectedCustomerId} placeholder="e.g. Ahmed Khan" />
+                    </div>
+                    <div className="form-group">
+                      <label>2. ایڈریس / Address</label>
+                      <input className="form-control" value={newEntry.address} onChange={e => setNewEntry({ ...newEntry, address: e.target.value })} readOnly={editMode === 'payment' && !!selectedCustomerId} placeholder="e.g. Karachi" />
+                    </div>
+                    <div className="form-group">
+                      <label>3. فون نمبر / Phone Number</label>
+                      <input className="form-control" value={newEntry.phone} onChange={e => setNewEntry({ ...newEntry, phone: e.target.value })} readOnly={editMode === 'payment' && !!selectedCustomerId} placeholder="03XX-XXXXXXX" />
+                    </div>
+                    <div className="form-group">
+                      <label>Nickname (عرفیت/شہر)</label>
+                      <input className="form-control" value={newEntry.nickname} onChange={e => setNewEntry({ ...newEntry, nickname: e.target.value })} readOnly={editMode === 'payment' && !!selectedCustomerId} placeholder="Optional" />
+                    </div>
+                  </div>
+
+                  {editMode !== 'payment' && (
+                    <>
+                      <h4 style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', textTransform: 'uppercase', margin: '24px 0 12px' }}>ریٹ سیٹنگ (Rate Settings)</h4>
+                      <div className="form-grid cols-2" style={{ marginBottom: 20 }}>
+                        <div className="form-group">
+                          <label>Commission % (کمیشن فیصد)</label>
+                          <input type="number" step="0.01" className="form-control" required value={newEntry.commPercent} onChange={e => setNewEntry({ ...newEntry, commPercent: Number(e.target.value) })} />
+                        </div>
+                        <div className="form-group">
+                          <label>Wari Rate (واری ریٹ)</label>
+                          <input type="number" step="0.1" className="form-control" value={newEntry.wariRate} onChange={e => setNewEntry({ ...newEntry, wariRate: Number(e.target.value) })} />
+                        </div>
+                      </div>
+
+                      <h4 style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', textTransform: 'uppercase', marginBottom: 12 }}>4-11. خریداری ڈیٹا (Purchase Data)</h4>
+                      {purchases.map((p, idx) => (
+                        <div key={p.id} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 16, marginBottom: 14, background: 'rgba(255,255,255,0.01)' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                            <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--blue)' }}>Purchase {idx + 1}</span>
+                            {purchases.length > 1 && (
+                              <button type="button" className="topbar-icon-btn" style={{ color: 'var(--red)' }} onClick={() => setPurchases(purchases.filter(x => x.id !== p.id))}>
+                                <X size={14} />
+                              </button>
+                            )}
+                          </div>
+                          <div className="form-grid cols-3">
+                            <div className="form-group">
+                              <label>4. تاریخ خریداری / Purchase Date *</label>
+                              <input type="date" className="form-control" required value={p.date} onChange={e => setPurchases(purchases.map(x => x.id === p.id ? { ...x, date: e.target.value } : x))} />
+                            </div>
+                            <div className="form-group">
+                              <label>5. تعداد کریٹ / Number of Crates *</label>
+                              <input type="number" className="form-control" required value={p.crates || ''} onChange={e => {
+                                const crates = Number(e.target.value);
+                                setPurchases(purchases.map(x => x.id === p.id ? { ...x, crates, totalValue: crates * (x.rate || 0) } : x));
+                              }} />
+                            </div>
+                            <div className="form-group">
+                              <label>6. فی کریٹ قیمت / Price per Crate *</label>
+                              <input type="number" className="form-control" required value={p.rate || ''} onChange={e => {
+                                const rate = Number(e.target.value);
+                                setPurchases(purchases.map(x => x.id === p.id ? { ...x, rate, totalValue: (x.crates || 0) * rate } : x));
+                              }} placeholder="Price per crate" />
+                            </div>
+                            <div className="form-group">
+                              <label>7. کل کریٹ قیمت / Total Crate Price *</label>
+                              <input type="number" className="form-control" required value={p.totalValue || ''} onChange={e => {
+                                const totalValue = Number(e.target.value);
+                                const crates = p.crates || 1;
+                                setPurchases(purchases.map(x => x.id === p.id ? { ...x, totalValue, rate: Math.round((totalValue / crates) * 100) / 100 } : x));
+                              }} placeholder="Total for these crates" />
+                            </div>
+                            <div className="form-group">
+                              <label>11. بل نمبر / Bill Number</label>
+                              <input className="form-control" value={p.billNo} onChange={e => setPurchases(purchases.map(x => x.id === p.id ? { ...x, billNo: e.target.value } : x))} placeholder="Optional" />
+                            </div>
+                            <div className="form-group">
+                              <label>12. ادائیگی نقد / Cash Payment (Advance)</label>
+                              <input type="number" className="form-control" value={p.advance || ''} onChange={e => setPurchases(purchases.map(x => x.id === p.id ? { ...x, advance: Number(e.target.value) } : x))} placeholder="0" />
+                            </div>
+                            <div className="form-group">
+                              <label>10. ڈسکاؤنٹ / رعایت / Discount</label>
+                              <input type="number" className="form-control" value={p.discount || ''} onChange={e => setPurchases(purchases.map(x => x.id === p.id ? { ...x, discount: Number(e.target.value) } : x))} placeholder="0" />
+                            </div>
+                          </div>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: 12, padding: '10px', background: 'rgba(0,0,0,0.2)', borderRadius: 6 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                              <span>8. نگواری / کیرج (فی کریٹ 5 روپے) / Nighwari / Carriage:</span>
+                              <span style={{ fontWeight: 600 }}>Rs. {(p.crates * newEntry.wariRate).toLocaleString()}</span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span>9. کمیشن (7.25%) / Commission:</span>
+                              <span style={{ fontWeight: 600 }}>Rs. {Math.round((p.totalValue * newEntry.commPercent) / 100).toLocaleString()}</span>
+                            </div>
+                          </div>
+                          <div style={{ marginTop: 12 }}>
+                            <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginBottom: 8 }}>13. ادھار / کریڈٹ / Credit</label>
+                            <div style={{ display: 'flex', gap: 10 }}>
+                              {(['Cash', 'Credit'] as const).map(m => (
+                                <label key={m} onClick={() => setPurchases(purchases.map(x => x.id === p.id ? { ...x, paymentMode: m } : x))} style={{
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                                  flex: 1, padding: '8px 0', borderRadius: 8, cursor: 'pointer', fontSize: '0.85rem',
+                                  border: `2px solid ${p.paymentMode === m ? (m === 'Cash' ? 'var(--orange)' : 'var(--blue)') : 'var(--border)'}`,
+                                  background: p.paymentMode === m ? (m === 'Cash' ? 'rgba(255,149,0,0.08)' : 'rgba(0,122,255,0.08)') : 'transparent',
+                                  fontWeight: p.paymentMode === m ? 700 : 400,
+                                  color: p.paymentMode === m ? (m === 'Cash' ? 'var(--orange)' : 'var(--blue)') : 'var(--text-secondary)',
+                                }}>
+                                  {m === 'Cash' ? '💵 نقد (Cash)' : '📋 ادھار (Credit)'}
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </>
+                  )}
+
+                  {(editMode === null || editMode === 'customer' || editMode === 'sale' || editMode === 'payment') && (
+                    <>
+                      <h4 style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', textTransform: 'uppercase', margin: '24px 0 16px' }}>14-19. رقم کی وصولی (Record Payments)</h4>
+                      {entryPayments.map((p, idx) => (
+                        <div key={p.id} style={{ border: '1px solid var(--border)', padding: 12, borderRadius: 8, marginBottom: 12, background: 'rgba(255,255,255,0.01)' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                            <span style={{ fontSize: '0.75rem', fontWeight: 600 }}>Payment {idx + 1}</span>
+                            {entryPayments.length > 1 && (
+                              <button type="button" className="topbar-icon-btn" style={{ color: 'var(--red)' }} onClick={() => setEntryPayments(entryPayments.filter(x => x.id !== p.id))}><X size={14} /></button>
+                            )}
+                          </div>
+                          <div className="form-grid cols-2">
+                            <div className="form-group">
+                              <label>Payment Amount (رقم)</label>
+                              <input type="number" className="form-control" value={p.amount || ''} onChange={e => setEntryPayments(entryPayments.map(x => x.id === p.id ? { ...x, amount: Number(e.target.value) } : x))} placeholder="0" />
+                            </div>
+                            <div className="form-group">
+                              <label>14. تاریخ ادائیگی / Payment Date</label>
+                              <input type="date" className="form-control" value={p.date} onChange={e => setEntryPayments(entryPayments.map(x => x.id === p.id ? { ...x, date: e.target.value } : x))} />
+                            </div>
+                            <div className="form-group">
+                              <label>15. صورت ادائیگی / Payment Method</label>
+                              <select className="form-control" value={p.method} onChange={e => setEntryPayments(entryPayments.map(x => x.id === p.id ? { ...x, method: e.target.value as any } : x))}>
+                                <option value="Cash">16. کیش / Cash</option>
+                                <option value="Online">17. آن لائن / Online</option>
+                                <option value="Bank">Bank</option>
+                                <option value="Credit">Credit</option>
+                              </select>
+                            </div>
+                            {(p.method === 'Online' || p.method === 'Bank') && (
+                              <>
+                                <div className="form-group">
+                                  <label>18. ادائیگی اکاؤنٹ نمبر / Payment Account Number</label>
+                                  <input className="form-control" value={p.accountNo} onChange={e => setEntryPayments(entryPayments.map(x => x.id === p.id ? { ...x, accountNo: e.target.value } : x))} placeholder="Account No" />
+                                </div>
+                                <div className="form-group">
+                                  <label>19. اکاؤنٹ ہولڈر نام / Account Holder Name</label>
+                                  <input className="form-control" value={p.accountHolderName} onChange={e => setEntryPayments(entryPayments.map(x => x.id === p.id ? { ...x, accountHolderName: e.target.value } : x))} placeholder="Holder Name" />
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </>
+                  )}
+                </div>
+                <div className="modal-footer">
+                  <button type="button" className="btn btn-ghost" onClick={resetForm} disabled={isSaving}>Cancel</button>
+                  <button type="submit" className="btn btn-primary" disabled={isSaving}>
+                    {isSaving ? 'پراسیس ہو رہا ہے (Saving...)' : 'محفوظ کریں (Save Entry)'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
         {/* ── Advance Edit Modal ── */}
         {advanceEditSale && (
           <div className="modal-overlay">
@@ -834,13 +1088,6 @@ const CustomerModule: React.FC = () => {
       </div>
     );
   }
-
-  const filteredCustomers = store.customers.filter(c => {
-    if (!searchQuery) return true;
-    const q = searchQuery.toLowerCase();
-    if (c.name.toLowerCase().includes(q) || (c.phone && c.phone.includes(q)) || (c.nickname && c.nickname.toLowerCase().includes(q))) return true;
-    return false;
-  });
 
   return (
     <div>
@@ -947,19 +1194,23 @@ const CustomerModule: React.FC = () => {
             </div>
             <form onSubmit={handleAddEntry}>
               <div className="modal-body">
-                <h4 style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', textTransform: 'uppercase', marginBottom: 16 }}>خریدار پروفائل (Customer Profile)</h4>
-                <div className="form-grid cols-3">
+                <h4 style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', textTransform: 'uppercase', marginBottom: 16 }}>1-3. خریدار پروفائل (Customer Profile)</h4>
+                <div className="form-grid cols-2">
                   <div className="form-group">
-                    <label>Name (نام)</label>
-                    <input className="form-control" required value={newEntry.name} onChange={e => setNewEntry({ ...newEntry, name: e.target.value })} readOnly={editMode === 'payment' && !!selectedCustomerId} />
+                    <label>1. نام خریدار / Buyer Name *</label>
+                    <input className="form-control" required value={newEntry.name} onChange={e => setNewEntry({ ...newEntry, name: e.target.value })} readOnly={editMode === 'payment' && !!selectedCustomerId} placeholder="e.g. Ahmed Khan" />
                   </div>
                   <div className="form-group">
-                    <label>Phone Number (فون نمبر)</label>
-                    <input className="form-control" value={newEntry.phone} onChange={e => setNewEntry({ ...newEntry, phone: e.target.value })} readOnly={editMode === 'payment' && !!selectedCustomerId} />
+                    <label>2. ایڈریس / Address</label>
+                    <input className="form-control" value={newEntry.address} onChange={e => setNewEntry({ ...newEntry, address: e.target.value })} readOnly={editMode === 'payment' && !!selectedCustomerId} placeholder="e.g. Karachi" />
+                  </div>
+                  <div className="form-group">
+                    <label>3. فون نمبر / Phone Number</label>
+                    <input className="form-control" value={newEntry.phone} onChange={e => setNewEntry({ ...newEntry, phone: e.target.value })} readOnly={editMode === 'payment' && !!selectedCustomerId} placeholder="03XX-XXXXXXX" />
                   </div>
                   <div className="form-group">
                     <label>Nickname (عرفیت/شہر)</label>
-                    <input className="form-control" value={newEntry.nickname} onChange={e => setNewEntry({ ...newEntry, nickname: e.target.value })} readOnly={editMode === 'payment' && !!selectedCustomerId} />
+                    <input className="form-control" value={newEntry.nickname} onChange={e => setNewEntry({ ...newEntry, nickname: e.target.value })} readOnly={editMode === 'payment' && !!selectedCustomerId} placeholder="Optional" />
                   </div>
                 </div>
 
@@ -979,7 +1230,7 @@ const CustomerModule: React.FC = () => {
                     </div>
 
                     {/* Multiple Purchases */}
-                    <h4 style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', textTransform: 'uppercase', marginBottom: 12 }}>خریداری ڈیٹا (Purchase Data)</h4>
+                    <h4 style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', textTransform: 'uppercase', marginBottom: 12 }}>4-11. خریداری ڈیٹا (Purchase Data)</h4>
                     {purchases.map((p, idx) => (
                       <div key={p.id} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 16, marginBottom: 14, background: 'rgba(255,255,255,0.01)' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
@@ -992,49 +1243,68 @@ const CustomerModule: React.FC = () => {
                         </div>
                         <div className="form-grid cols-3">
                           <div className="form-group">
-                            <label>Date (تاریخ)</label>
+                            <label>4. تاریخ خریداری / Purchase Date *</label>
                             <input type="date" className="form-control" required value={p.date} onChange={e => setPurchases(purchases.map(x => x.id === p.id ? { ...x, date: e.target.value } : x))} />
                           </div>
                           <div className="form-group">
-                            <label>Crates (کریٹس)</label>
-                            <input type="number" className="form-control" required value={p.crates || ''} onChange={e => setPurchases(purchases.map(x => x.id === p.id ? { ...x, crates: Number(e.target.value) } : x))} />
+                            <label>5. تعداد کریٹ / Number of Crates *</label>
+                            <input type="number" className="form-control" required value={p.crates || ''} onChange={e => setPurchases(purchases.map(x => x.id === p.id ? { ...x, crates: Number(e.target.value), totalValue: Number(e.target.value) * (p.rate || 0) } : x))} />
                           </div>
                           <div className="form-group">
-                            <label>Total Value (کل رقم)</label>
-                            <input type="number" className="form-control" required value={p.totalValue || ''} onChange={e => setPurchases(purchases.map(x => x.id === p.id ? { ...x, totalValue: Number(e.target.value) } : x))} placeholder="Total value of all crates" />
-                            {p.crates > 0 && p.totalValue > 0 && (
-                              <p style={{ fontSize: '0.68rem', color: 'var(--text-tertiary)', marginTop: 3 }}>
-                                Rs. {(p.totalValue / p.crates).toFixed(2)} / crate
-                              </p>
-                            )}
+                            <label>6. فی کریٹ قیمت / Price per Crate *</label>
+                            <input type="number" className="form-control" required value={p.rate || ''} onChange={e => setPurchases(purchases.map(x => x.id === p.id ? { ...x, rate: Number(e.target.value), totalValue: x.crates * Number(e.target.value) } : x))} placeholder="Price per crate" />
+                          </div>
+                          {p.crates > 0 && p.rate > 0 && (
+                            <div className="form-group">
+                              <label>7. کل کریٹ قیمت / Total Crate Price (Auto-calculated)</label>
+                              <div style={{ padding: '8px 12px', background: 'var(--bg-secondary)', borderRadius: 6, fontSize: '0.9rem', fontWeight: 600, color: 'var(--green)' }}>
+                                Rs. {(p.crates * p.rate).toLocaleString()}
+                              </div>
+                            </div>
+                          )}
+                          <div className="form-group">
+                            <label>11. بل نمبر / Bill Number</label>
+                            <input className="form-control" value={p.billNo} onChange={e => setPurchases(purchases.map(x => x.id === p.id ? { ...x, billNo: e.target.value } : x))} placeholder="Optional" />
                           </div>
                           <div className="form-group">
-                            <label>Bill No (بل نمبر)</label>
-                            <input className="form-control" value={p.billNo} onChange={e => setPurchases(purchases.map(x => x.id === p.id ? { ...x, billNo: e.target.value } : x))} />
-                          </div>
-                          <div className="form-group">
-                            <label>Advance (بیانہ)</label>
+                            <label>12. ادائیگی نقد / Cash Payment (Advance)</label>
                             <input type="number" className="form-control" value={p.advance || ''} onChange={e => setPurchases(purchases.map(x => x.id === p.id ? { ...x, advance: Number(e.target.value) } : x))} placeholder="0" />
                           </div>
                           <div className="form-group">
-                            <label>Discount (رعایت)</label>
+                            <label>10. ڈسکاؤنٹ / رعایت / Discount</label>
                             <input type="number" className="form-control" value={p.discount || ''} onChange={e => setPurchases(purchases.map(x => x.id === p.id ? { ...x, discount: Number(e.target.value) } : x))} placeholder="0" />
                           </div>
                         </div>
+                        
+                        {/* Show calculated fields 8-9 */}
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: 12, padding: '10px', background: 'rgba(0,0,0,0.2)', borderRadius: 6 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                            <span>8. نگواری / کیرج (فی کریٹ 5 روپے) / Nighwari / Carriage:</span>
+                            <span style={{ fontWeight: 600 }}>Rs. {(p.crates * newEntry.wariRate).toLocaleString()}</span>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span>9. کمیشن (7.25%) / Commission:</span>
+                            <span style={{ fontWeight: 600 }}>Rs. {Math.round((p.totalValue * newEntry.commPercent) / 100).toLocaleString()}</span>
+                          </div>
+                        </div>
+                        
                         {/* Payment Mode per purchase */}
-                        <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
-                          {(['Cash', 'Credit'] as const).map(m => (
-                            <label key={m} onClick={() => setPurchases(purchases.map(x => x.id === p.id ? { ...x, paymentMode: m } : x))} style={{
-                              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                              flex: 1, padding: '8px 0', borderRadius: 8, cursor: 'pointer', fontSize: '0.85rem',
-                              border: `2px solid ${p.paymentMode === m ? (m === 'Cash' ? 'var(--orange)' : 'var(--blue)') : 'var(--border)'}`,
-                              background: p.paymentMode === m ? (m === 'Cash' ? 'rgba(255,149,0,0.08)' : 'rgba(0,122,255,0.08)') : 'transparent',
-                              fontWeight: p.paymentMode === m ? 700 : 400,
-                              color: p.paymentMode === m ? (m === 'Cash' ? 'var(--orange)' : 'var(--blue)') : 'var(--text-secondary)',
-                            }}>
-                              {m === 'Cash' ? '💵 نقد (Cash)' : '📋 ادھار (Credit)'}
-                            </label>
-                          ))}
+                        <div style={{ marginTop: 12 }}>
+                          <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginBottom: 8 }}>13. ادھار / کریڈٹ / Credit</label>
+                          <div style={{ display: 'flex', gap: 10 }}>
+                            {(['Cash', 'Credit'] as const).map(m => (
+                              <label key={m} onClick={() => setPurchases(purchases.map(x => x.id === p.id ? { ...x, paymentMode: m } : x))} style={{
+                                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                                flex: 1, padding: '8px 0', borderRadius: 8, cursor: 'pointer', fontSize: '0.85rem',
+                                border: `2px solid ${p.paymentMode === m ? (m === 'Cash' ? 'var(--orange)' : 'var(--blue)') : 'var(--border)'}`,
+                                background: p.paymentMode === m ? (m === 'Cash' ? 'rgba(255,149,0,0.08)' : 'rgba(0,122,255,0.08)') : 'transparent',
+                                fontWeight: p.paymentMode === m ? 700 : 400,
+                                color: p.paymentMode === m ? (m === 'Cash' ? 'var(--orange)' : 'var(--blue)') : 'var(--text-secondary)',
+                              }}>
+                                {m === 'Cash' ? '💵 نقد (Cash)' : '📋 ادھار (Credit)'}
+                              </label>
+                            ))}
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -1043,7 +1313,7 @@ const CustomerModule: React.FC = () => {
                       onClick={() => setPurchases([...purchases, {
                         id: Math.random().toString(),
                         date: new Date().toISOString().split('T')[0],
-                        crates: 0, totalValue: 0, billNo: '',
+                        crates: 0, rate: 0, totalValue: 0, billNo: '',
                         advance: 0, advanceMethod: 'Cash' as const, discount: 0, paymentMode: 'Credit' as const,
                       }])}>
                       <Plus size={14} style={{ marginRight: 4 }} /> مزید خریداری (Add Another Purchase)
@@ -1111,7 +1381,7 @@ const CustomerModule: React.FC = () => {
 
                 {(editMode === null || editMode === 'customer' || editMode === 'sale' || editMode === 'payment') && (
                   <>
-                    <h4 style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', textTransform: 'uppercase', margin: '24px 0 16px' }}>رقم کی وصولی (Record Payments)</h4>
+                    <h4 style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', textTransform: 'uppercase', margin: '24px 0 16px' }}>14-19. رقم کی وصولی (Record Payments)</h4>
                     {entryPayments.map((p, idx) => (
                       <div key={p.id} style={{ border: '1px solid var(--border)', padding: 12, borderRadius: 8, marginBottom: 12, background: 'rgba(255,255,255,0.01)' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
@@ -1122,24 +1392,34 @@ const CustomerModule: React.FC = () => {
                         </div>
                         <div className="form-grid cols-2">
                           <div className="form-group">
-                            <label>Amount (رقم)</label>
-                            <input type="number" className="form-control" value={p.amount || ''} onChange={e => setEntryPayments(entryPayments.map(x => x.id === p.id ? { ...x, amount: Number(e.target.value) } : x))} />
+                            <label>Payment Amount (رقم)</label>
+                            <input type="number" className="form-control" value={p.amount || ''} onChange={e => setEntryPayments(entryPayments.map(x => x.id === p.id ? { ...x, amount: Number(e.target.value) } : x))} placeholder="0" />
                           </div>
                           <div className="form-group">
-                            <label>Date (تاریخ)</label>
+                            <label>14. تاریخ ادائیگی / Payment Date</label>
                             <input type="date" className="form-control" value={p.date} onChange={e => setEntryPayments(entryPayments.map(x => x.id === p.id ? { ...x, date: e.target.value } : x))} />
                           </div>
-                          <div className="form-group" style={{ gridColumn: 'span 2' }}>
-                            <label>Method</label>
-                            <div style={{ display: 'flex', gap: 16, marginTop: 4 }}>
-                              {['Cash', 'Bank', 'Credit'].map(m => (
-                                <label key={m} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '0.85rem' }}>
-                                  <input type="radio" name={`payMode-${p.id}`} checked={p.method === m} onChange={() => setEntryPayments(entryPayments.map(x => x.id === p.id ? { ...x, method: m as any } : x))} />
-                                  {m}
-                                </label>
-                              ))}
-                            </div>
+                          <div className="form-group">
+                            <label>15. صورت ادائیگی / Payment Method</label>
+                            <select className="form-control" value={p.method} onChange={e => setEntryPayments(entryPayments.map(x => x.id === p.id ? { ...x, method: e.target.value as any } : x))}>
+                              <option value="Cash">16. کیش / Cash</option>
+                              <option value="Online">17. آن لائن / Online</option>
+                              <option value="Bank">Bank</option>
+                              <option value="Credit">Credit</option>
+                            </select>
                           </div>
+                          {(p.method === 'Online' || p.method === 'Bank') && (
+                            <>
+                            <div className="form-group">
+                              <label>18. ادائیگی اکاؤنٹ نمبر / Payment Account Number</label>
+                              <input className="form-control" value={p.accountNo} onChange={e => setEntryPayments(entryPayments.map(x => x.id === p.id ? { ...x, accountNo: e.target.value } : x))} placeholder="Account No" />
+                            </div>
+                            <div className="form-group">
+                              <label>19. اکاؤنٹ ہولڈر نام / Account Holder Name</label>
+                              <input className="form-control" value={p.accountHolderName} onChange={e => setEntryPayments(entryPayments.map(x => x.id === p.id ? { ...x, accountHolderName: e.target.value } : x))} placeholder="Holder Name" />
+                            </div>
+                            </>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -1148,7 +1428,7 @@ const CustomerModule: React.FC = () => {
                       type="button"
                       className="btn btn-secondary"
                       style={{ marginBottom: 16, fontSize: '0.75rem' }}
-                      onClick={() => setEntryPayments([...entryPayments, { id: Math.random().toString(), amount: 0, date: new Date().toISOString().split('T')[0], method: 'Cash' }])}
+                      onClick={() => setEntryPayments([...entryPayments, { id: Math.random().toString(), amount: 0, date: new Date().toISOString().split('T')[0], method: 'Cash', accountNo: '', accountHolderName: '' }])}
                     >
                       <Plus size={14} style={{ marginRight: 4 }} /> {remainingBill <= 0 ? 'Bill Fully Paid' : 'Add Multiple Payment (مزید ادائیگی)'}
                     </button>

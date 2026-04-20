@@ -168,6 +168,18 @@ export function openPrintWindow(opts: PrintOptions) {
 
   ${summaryHtml}
 
+  <div style="margin-top: 24px; padding: 12px; border: 1.5px solid #eee; border-radius: 8px; width: fit-content; min-width: 280px; clear: both;">
+    <div style="font-size: 9px; font-weight: 700; color: ${BRAND_COLOR}; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; border-bottom: 1px solid #eee; padding-bottom: 4px;">
+      Bank Account Details (برائے مہربانی اس اکاؤنٹ میں ادائیگی کریں)
+    </div>
+    <div style="font-size: 10.5px; color: #1a1a1a; line-height: 1.6;">
+      <div style="font-weight: 700;">Name: KHALID MEHMOOD ABBASI</div>
+      <div style="font-family: monospace; font-size: 11px; font-weight: 600;">Account: 08120103923924</div>
+      <div style="font-family: monospace; font-size: 11px; font-weight: 600;">IBAN: PK67MEZN0008120103923924</div>
+      <div style="font-size: 9.5px; color: #666; font-weight: 500;">Meezan Bank, KHANNA PUL-RAWALPINDI Branch</div>
+    </div>
+  </div>
+
   <div class="footer">
     <span>Abbasi &amp; Co — Tomato Trading Management System</span>
     <span>Powered By <a href="https://www.nexauratechs.com" target="_blank" style="color:#1a1a2e;font-weight:600;text-decoration:none">Nexaura Technologies</a></span>

@@ -44,11 +44,14 @@ export interface TruckRecord {
   truckNo: string;
   loadingDate: string;
   builtyNo: string;
-  carriage: number;
+  carriage: number;       // لاگا / کیرج (Laga/Carriage) — Rs. 10 per crate
+  truckFare: number;      // ٹرک کرایہ (Truck Fare)
+  labourCharges: number;  // مزدوری (Labour Charges) — Rs. 10 per crate
   saleDate: string;
   advance: number;
-  commPercent?: number;
-  wariRate?: number;
+  advanceDate: string;    // تاریخ بیانہ (Advance Date)
+  bardana: number;        // باردانہ / ایڈوانس (Bardana Advance)
+  bardanaDate: string;    // تاریخ باردانہ (Bardana Date)
   parties: TruckParty[];
   paymentMode: 'Cash' | 'Credit'; // how the supplier was paid
   remarks?: string;
@@ -61,15 +64,19 @@ export interface SupplierPayment {
   supplierId: string;
   amount: number;
   date: string;
-  method: 'Cash' | 'Bank' | 'Advance' | 'Credit';
+  method: 'Cash' | 'Online' | 'Bank' | 'Advance' | 'Credit';
+  accountNo?: string;         // ادائیگی اکاؤنٹ نمبر
+  accountHolderName?: string; // اکاؤنٹ ہولڈر نام
   addedBy?: string;
   addedAtStr?: string;
 }
 
 export interface Supplier {
   id: string;
+  supplierCode: string;  // Max 5 characters, searchable ID (e.g., "S0001")
   name: string;
   city: string;
+  phone?: string;        // فون نمبر / Phone Number
   status: SupplierStatus;
   trucks: TruckRecord[];
   payments: SupplierPayment[];
@@ -108,7 +115,9 @@ export interface CustomerPayment {
   customerId: string;
   amount: number;
   date: string;
-  method: 'Cash' | 'Credit' | 'Bank';
+  method: 'Cash' | 'Online' | 'Credit' | 'Bank';
+  accountNo?: string;         // ادائیگی اکاؤنٹ نمبر
+  accountHolderName?: string; // اکاؤنٹ ہولڈر نام
   addedBy?: string;
   addedAtStr?: string;
 }
@@ -118,6 +127,7 @@ export interface Customer {
   name: string;
   phone: string;
   nickname: string;
+  address?: string;        // ایڈریس / Address
   sales: CustomerSale[];
   payments: CustomerPayment[];
   returns: CustomerReturn[];
@@ -138,10 +148,8 @@ export interface AppUser {
 //  CALCULATION CONSTANTS
 // ============================================
 
-export const CASH_WARI_SUPPLIER = 10; // Rs per crate (requirement: 10)
 export const CASH_WARI_CUSTOMER = 5;  // Rs per crate (requirement: 5)
 export const CUSTOMER_COMMISSION_PERCENT = 7.25;
-export const SUPPLIER_COMMISSION_PERCENT = 13.6;
 export const CHARITY_PERCENT = 10;
 
 // ============================================
@@ -151,15 +159,8 @@ export const CHARITY_PERCENT = 10;
 export function calcTruckTotal(t: TruckRecord) {
   return (t.parties || []).reduce((s, p) => s + p.crates * p.rate, 0);
 }
-export function calcTruckCashWari(t: TruckRecord) {
-  const crates = (t.parties || []).reduce((s, p) => s + p.crates, 0);
-  return crates * (t.wariRate ?? CASH_WARI_SUPPLIER);
-}
-export function calcTruckCommission(t: TruckRecord) {
-  return Math.round(calcTruckTotal(t) * (t.commPercent ?? SUPPLIER_COMMISSION_PERCENT) / 100);
-}
 export function calcTruckNet(t: TruckRecord) {
-  return calcTruckTotal(t) - calcTruckCommission(t) - calcTruckCashWari(t);
+  return calcTruckTotal(t);
 }
 export function calcSupplierTotalBill(s: Supplier) {
   return (s.trucks || []).reduce((acc, t) => acc + calcTruckNet(t), 0);
@@ -179,8 +180,42 @@ export function calcSupplierGrossTotal(s: Supplier) {
 export function calcSupplierTotalReceived(s: Supplier) {
   return calcSupplierTotalAdvance(s) + calcSupplierTotalPayments(s);
 }
+export function calcSupplierTotalTruckFare(s: Supplier) {
+  return (s.trucks || []).reduce((acc, t) => acc + (t.truckFare ?? 0), 0);
+}
+export function calcSupplierTotalLabour(s: Supplier) {
+  return (s.trucks || []).reduce((acc, t) => acc + (t.labourCharges ?? 0), 0);
+}
+export function calcSupplierTotalBardana(s: Supplier) {
+  return (s.trucks || []).reduce((acc, t) => acc + (t.bardana ?? 0), 0);
+}
 export function calcSupplierBalance(s: Supplier) {
-  return calcSupplierTotalBill(s) - calcSupplierTotalCarriage(s) - calcSupplierTotalAdvance(s) - calcSupplierTotalPayments(s);
+  const totalBill = calcSupplierTotalBill(s);
+  const totalCarriage = calcSupplierTotalCarriage(s);
+  const totalTruckFare = calcSupplierTotalTruckFare(s);
+  const totalLabour = calcSupplierTotalLabour(s);
+  const totalAdvance = calcSupplierTotalAdvance(s);
+  const totalBardana = calcSupplierTotalBardana(s);
+  const totalPayments = calcSupplierTotalPayments(s);
+
+  const deductions = totalCarriage + totalTruckFare + totalLabour + totalAdvance + totalBardana + totalPayments;
+  const balance = totalBill - deductions;
+
+  console.log('[calcSupplierBalance]', {
+    totalBill,
+    totalCarriage,
+    totalTruckFare,
+    totalLabour,
+    totalAdvance,
+    totalBardana,
+    totalPayments,
+    deductions,
+    balance,
+    trucks: s.trucks.length,
+    payments: s.payments.length
+  });
+
+  return balance;
 }
 export function calcSaleTotal(sale: CustomerSale) { return sale.crates * sale.rate; }
 export function calcSaleCommission(sale: CustomerSale) {
@@ -244,8 +279,11 @@ function partnerToRow(p: Partner) {
 function mapTruck(r: any): TruckRecord {
   return {
     id: r.id, supplierId: r.supplier_id, truckNo: r.truck_no, loadingDate: r.loading_date,
-    builtyNo: r.builty_no || '', carriage: r.carriage, saleDate: r.sale_date || '',
-    advance: r.advance, commPercent: r.comm_percent, wariRate: r.wari_rate,
+    builtyNo: r.builty_no || '', carriage: r.carriage ?? 0, truckFare: r.truck_fare ?? 0,
+    labourCharges: r.labour_charges ?? 0,
+    saleDate: r.sale_date || '',
+    advance: r.advance ?? 0, advanceDate: r.advance_date || '',
+    bardana: r.bardana ?? 0, bardanaDate: r.bardana_date || '',
     parties: r.parties || [], paymentMode: r.payment_mode ?? 'Credit',
     remarks: r.remarks || '',
     addedBy: r.added_by, addedAtStr: r.added_at_str,
@@ -254,18 +292,21 @@ function mapTruck(r: any): TruckRecord {
 function truckToRow(t: TruckRecord) {
   return {
     id: t.id, supplier_id: t.supplierId, truck_no: t.truckNo, loading_date: t.loadingDate || null,
-    builty_no: t.builtyNo || null, carriage: t.carriage, sale_date: t.saleDate || null,
-    advance: t.advance, comm_percent: t.commPercent ?? null, wari_rate: t.wariRate ?? null,
+    builty_no: t.builtyNo || null, carriage: t.carriage, truck_fare: t.truckFare ?? 0,
+    labour_charges: t.labourCharges ?? 0,
+    sale_date: t.saleDate || null,
+    advance: t.advance, advance_date: t.advanceDate || null,
+    bardana: t.bardana ?? 0, bardana_date: t.bardanaDate || null,
     parties: t.parties, payment_mode: t.paymentMode ?? 'Credit',
     remarks: t.remarks || null,
     added_by: t.addedBy, added_at_str: t.addedAtStr,
   };
 }
 function mapSupplierPayment(r: any): SupplierPayment {
-  return { id: r.id, supplierId: r.supplier_id, amount: r.amount, date: r.date, method: r.method, addedBy: r.added_by, addedAtStr: r.added_at_str };
+  return { id: r.id, supplierId: r.supplier_id, amount: r.amount, date: r.date, method: r.method, accountNo: r.account_no || '', accountHolderName: r.account_holder_name || '', addedBy: r.added_by, addedAtStr: r.added_at_str };
 }
 function supplierPaymentToRow(p: SupplierPayment) {
-  return { id: p.id, supplier_id: p.supplierId, amount: p.amount, date: p.date || null, method: p.method, added_by: p.addedBy, added_at_str: p.addedAtStr };
+  return { id: p.id, supplier_id: p.supplierId, amount: p.amount, date: p.date || null, method: p.method, account_no: p.accountNo || null, account_holder_name: p.accountHolderName || null, added_by: p.addedBy, added_at_str: p.addedAtStr };
 }
 function mapSale(r: any): CustomerSale {
   return {
@@ -302,10 +343,10 @@ function customerReturnToRow(r: CustomerReturn) {
   };
 }
 function mapCustomerPayment(r: any): CustomerPayment {
-  return { id: r.id, customerId: r.customer_id, amount: r.amount, date: r.date, method: r.method, addedBy: r.added_by, addedAtStr: r.added_at_str };
+  return { id: r.id, customerId: r.customer_id, amount: r.amount, date: r.date, method: r.method, accountNo: r.account_no || '', accountHolderName: r.account_holder_name || '', addedBy: r.added_by, addedAtStr: r.added_at_str };
 }
 function customerPaymentToRow(p: CustomerPayment) {
-  return { id: p.id, customer_id: p.customerId, amount: p.amount, date: p.date || null, method: p.method, added_by: p.addedBy, added_at_str: p.addedAtStr };
+  return { id: p.id, customer_id: p.customerId, amount: p.amount, date: p.date || null, method: p.method, account_no: p.accountNo || null, account_holder_name: p.accountHolderName || null, added_by: p.addedBy, added_at_str: p.addedAtStr };
 }
 function mapUser(r: any): AppUser {
   return { id: r.id, name: r.name, email: r.email, password: r.password, role: r.role, status: r.status };
@@ -318,7 +359,21 @@ function mapUser(r: any): AppUser {
 function loadFromLS<T>(key: string, fallback: T): T {
   try { const r = localStorage.getItem(key); return r ? JSON.parse(r) : fallback; } catch { return fallback; }
 }
-const genId = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
+const genId = () => {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+};
+const genSupplierId = () => {
+  const prefix = 'S';
+  const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0'); // 4 random digits
+  return `${prefix}${random}`; // Format: S0001, S0042, etc.
+};
 const nowStr = () => new Date().toLocaleString();
 
 export function useMandiStore() {
@@ -384,7 +439,7 @@ export function useMandiStore() {
         const trucks = truckData.map(mapTruck);
         const supPays = supPayData.map(mapSupplierPayment);
         setSuppliers((supData as any[]).map(s => ({
-          id: s.id, name: s.name, city: s.city, status: s.status,
+          id: s.id, supplierCode: s.supplier_code || '', name: s.name, city: s.city, phone: s.phone || '', status: s.status,
           trucks: trucks.filter(t => t.supplierId === s.id),
           payments: supPays.filter(p => p.supplierId === s.id),
         })));
@@ -393,7 +448,7 @@ export function useMandiStore() {
         const custPays = custPayData.map(mapCustomerPayment);
         const custReturns = returnData.map(mapCustomerReturn);
         setCustomers((custData as any[]).map(c => ({
-          id: c.id, name: c.name, phone: c.phone || '', nickname: c.nickname || '',
+          id: c.id, name: c.name, phone: c.phone || '', nickname: c.nickname || '', address: c.address || '',
           sales: sales.filter(s => s.customerId === c.id),
           payments: custPays.filter(p => p.customerId === c.id),
           returns: custReturns.filter(r => r.customerId === c.id),
@@ -425,12 +480,15 @@ export function useMandiStore() {
   const updateExpense = async (id: string, u: Partial<Expense>) => {
     setExpenses(prev => prev.map(e => e.id === id ? { ...e, ...u } : e));
     const dbU: any = {};
-    if (u.date !== undefined) dbU.date = u.date;
+    if (u.date !== undefined) dbU.date = u.date || null;
     if (u.type !== undefined) dbU.type = u.type;
     if (u.amount !== undefined) dbU.amount = u.amount;
-    if (u.notes !== undefined) dbU.notes = u.notes;
+    if (u.notes !== undefined) dbU.notes = u.notes || null;
     const { error } = await supabase.from('expenses').update(dbU).eq('id', id);
-    if (error) console.error('updateExpense failed:', error.message);
+    if (error) {
+      console.error('[DB] updateExpense failed:', error.message, dbU);
+      setDbError(`Expense update failed: ${error.message}`);
+    }
   };
   const deleteExpense = async (id: string) => {
     setExpenses(prev => prev.filter(e => e.id !== id));
@@ -449,7 +507,11 @@ export function useMandiStore() {
     if (u.name !== undefined) dbU.name = u.name;
     if (u.investment !== undefined) dbU.investment = u.investment;
     if (u.sharePercent !== undefined) dbU.share_percent = u.sharePercent;
-    await supabase.from('investors').update(dbU).eq('id', id);
+    const { error } = await supabase.from('investors').update(dbU).eq('id', id);
+    if (error) {
+      console.error('[DB] updateInvestor failed:', error.message, dbU);
+      setDbError(`Investor update failed: ${error.message}`);
+    }
   };
   const deleteInvestor = async (id: string) => {
     setInvestors(prev => prev.filter(i => i.id !== id));
@@ -467,7 +529,11 @@ export function useMandiStore() {
     const dbU: any = {};
     if (u.name !== undefined) dbU.name = u.name;
     if (u.sharePercent !== undefined) dbU.share_percent = u.sharePercent;
-    await supabase.from('partners').update(dbU).eq('id', id);
+    const { error } = await supabase.from('partners').update(dbU).eq('id', id);
+    if (error) {
+      console.error('[DB] updatePartner failed:', error.message, dbU);
+      setDbError(`Partner update failed: ${error.message}`);
+    }
   };
   const deletePartner = async (id: string) => {
     setPartners(prev => prev.filter(p => p.id !== id));
@@ -476,16 +542,17 @@ export function useMandiStore() {
 
   // ── Suppliers ──
   const addSupplierWithFirstTruck = async (
-    supplierData: Omit<Supplier, 'id' | 'trucks' | 'payments'>,
+    supplierData: Omit<Supplier, 'id' | 'trucks' | 'payments' | 'supplierCode'>,
     truckData: Omit<TruckRecord, 'id' | 'supplierId'>,
     payments: { amount: number; date: string; method: 'Cash' | 'Credit' | 'Bank' }[] = []
   ) => {
     const meta = getMeta();
     const existing = suppliers.find(
       s => s.name.trim().toLowerCase() === supplierData.name.trim().toLowerCase() &&
-           s.city.trim().toLowerCase() === supplierData.city.trim().toLowerCase()
+        s.city.trim().toLowerCase() === supplierData.city.trim().toLowerCase()
     );
     const supplierId = existing ? existing.id : genId();
+    const supplierCode = existing ? existing.supplierCode : genSupplierId();
     const newTruck: TruckRecord = { ...truckData, id: genId(), supplierId, ...meta };
     const newPayments: SupplierPayment[] = payments
       .filter(p => p.amount > 0)
@@ -496,9 +563,9 @@ export function useMandiStore() {
         ? { ...s, trucks: [...s.trucks, newTruck], payments: [...s.payments, ...newPayments] }
         : s));
     } else {
-      const newSupplier: Supplier = { ...supplierData, id: supplierId, trucks: [newTruck], payments: newPayments };
+      const newSupplier: Supplier = { ...supplierData, id: supplierId, supplierCode, trucks: [newTruck], payments: newPayments };
       setSuppliers(prev => [...prev, newSupplier]);
-      const { error: se } = await supabase.from('suppliers').insert({ id: supplierId, name: supplierData.name, city: supplierData.city, status: supplierData.status });
+      const { error: se } = await supabase.from('suppliers').insert({ id: supplierId, supplier_code: supplierCode, name: supplierData.name, city: supplierData.city, phone: supplierData.phone || null, status: supplierData.status });
       if (se) { console.error('[DB] insert supplier failed:', se.message); setDbError(`Supplier save failed: ${se.message}`); return; }
     }
     const { error: te } = await supabase.from('truck_records').insert(truckToRow(newTruck));
@@ -509,9 +576,13 @@ export function useMandiStore() {
     }
   };
 
-  const updateSupplier = async (id: string, u: Partial<Pick<Supplier, 'name' | 'city' | 'status'>>) => {
+  const updateSupplier = async (id: string, u: Partial<Pick<Supplier, 'name' | 'city' | 'phone' | 'status'>>) => {
     setSuppliers(prev => prev.map(s => s.id === id ? { ...s, ...u } : s));
-    await supabase.from('suppliers').update(u).eq('id', id);
+    const { error } = await supabase.from('suppliers').update(u).eq('id', id);
+    if (error) {
+      console.error('[DB] updateSupplier failed:', error.message, u);
+      setDbError(`Supplier update failed: ${error.message}`);
+    }
   };
   const deleteSupplier = async (id: string) => {
     setSuppliers(prev => prev.filter(s => s.id !== id));
@@ -528,17 +599,24 @@ export function useMandiStore() {
       ? { ...s, trucks: s.trucks.map(t => t.id === truckId ? { ...t, ...u } : t) } : s));
     const dbU: any = {};
     if (u.truckNo !== undefined) dbU.truck_no = u.truckNo;
-    if (u.loadingDate !== undefined) dbU.loading_date = u.loadingDate;
-    if (u.builtyNo !== undefined) dbU.builty_no = u.builtyNo;
+    if (u.loadingDate !== undefined) dbU.loading_date = u.loadingDate || null;
+    if (u.builtyNo !== undefined) dbU.builty_no = u.builtyNo || null;
     if (u.carriage !== undefined) dbU.carriage = u.carriage;
-    if (u.saleDate !== undefined) dbU.sale_date = u.saleDate;
+    if (u.truckFare !== undefined) dbU.truck_fare = u.truckFare;
+    if (u.labourCharges !== undefined) dbU.labour_charges = u.labourCharges;
+    if (u.saleDate !== undefined) dbU.sale_date = u.saleDate || null;
     if (u.advance !== undefined) dbU.advance = u.advance;
-    if (u.commPercent !== undefined) dbU.comm_percent = u.commPercent;
-    if (u.wariRate !== undefined) dbU.wari_rate = u.wariRate;
+    if (u.advanceDate !== undefined) dbU.advance_date = u.advanceDate || null;
+    if (u.bardana !== undefined) dbU.bardana = u.bardana;
+    if (u.bardanaDate !== undefined) dbU.bardana_date = u.bardanaDate || null;
     if (u.parties !== undefined) dbU.parties = u.parties;
     if (u.paymentMode !== undefined) dbU.payment_mode = u.paymentMode;
-    if (u.remarks !== undefined) dbU.remarks = u.remarks;
-    await supabase.from('truck_records').update(dbU).eq('id', truckId);
+    if (u.remarks !== undefined) dbU.remarks = u.remarks || null;
+    const { error } = await supabase.from('truck_records').update(dbU).eq('id', truckId);
+    if (error) {
+      console.error('[DB] updateTruck failed:', error.message, dbU);
+      setDbError(`Truck update failed: ${error.message}`);
+    }
   };
   const deleteTruck = async (supplierId: string, truckId: string) => {
     setSuppliers(prev => prev.map(s => s.id === supplierId
@@ -555,9 +633,15 @@ export function useMandiStore() {
       ? { ...s, payments: s.payments.map(p => p.id === paymentId ? { ...p, ...u } : p) } : s));
     const dbU: any = {};
     if (u.amount !== undefined) dbU.amount = u.amount;
-    if (u.date !== undefined) dbU.date = u.date;
+    if (u.date !== undefined) dbU.date = u.date || null;
     if (u.method !== undefined) dbU.method = u.method;
-    await supabase.from('supplier_payments').update(dbU).eq('id', paymentId);
+    if (u.accountNo !== undefined) dbU.account_no = u.accountNo || null;
+    if (u.accountHolderName !== undefined) dbU.account_holder_name = u.accountHolderName || null;
+    const { error } = await supabase.from('supplier_payments').update(dbU).eq('id', paymentId);
+    if (error) {
+      console.error('[DB] updateSupplierPayment failed:', error.message, dbU);
+      setDbError(`Payment update failed: ${error.message}`);
+    }
   };
   const deleteSupplierPayment = async (supplierId: string, paymentId: string) => {
     setSuppliers(prev => prev.map(s => s.id === supplierId
@@ -574,7 +658,7 @@ export function useMandiStore() {
     const meta = getMeta();
     const existing = customers.find(
       c => c.name.trim().toLowerCase() === customerData.name.trim().toLowerCase() &&
-           c.nickname.trim().toLowerCase() === customerData.nickname.trim().toLowerCase()
+        c.nickname.trim().toLowerCase() === customerData.nickname.trim().toLowerCase()
     );
     const customerId = existing ? existing.id : genId();
     const newSale: CustomerSale = { ...saleData, id: genId(), customerId, ...meta };
@@ -587,21 +671,22 @@ export function useMandiStore() {
         ? { ...c, sales: [...c.sales, newSale], payments: [...c.payments, ...newPayments] } : c));
     } else {
       setCustomers(prev => [...prev, { ...customerData, id: customerId, sales: [newSale], payments: newPayments, returns: [] }]);
-      const { error: ce } = await supabase.from('customers').insert({ id: customerId, name: customerData.name, phone: customerData.phone, nickname: customerData.nickname });
+      const { error: ce } = await supabase.from('customers').insert({ id: customerId, name: customerData.name, phone: customerData.phone, nickname: customerData.nickname, address: customerData.address || null });
       if (ce) { console.error('insert customer failed:', ce.message); return customerId; }
     }
     const { error: se } = await supabase.from('customer_sales').insert(saleToRow(newSale));
-    if (se) console.error('insert sale failed:', se.message, saleToRow(newSale));
+    if (se) { console.error('[DB] insert sale failed:', se.message, saleToRow(newSale)); setDbError(`Sale save failed: ${se.message}`); }
     if (newPayments.length > 0) {
       const { error: pe } = await supabase.from('customer_payments').insert(newPayments.map(customerPaymentToRow));
-      if (pe) console.error('insert payments failed:', pe.message);
+      if (pe) { console.error('[DB] insert payments failed:', pe.message); setDbError(`Payment save failed: ${pe.message}`); }
     }
     return customerId;
   };
 
-  const updateCustomer = async (id: string, u: Partial<Pick<Customer, 'name' | 'phone' | 'nickname'>>) => {
+  const updateCustomer = async (id: string, u: Partial<Pick<Customer, 'name' | 'phone' | 'nickname' | 'address'>>) => {
     setCustomers(prev => prev.map(c => c.id === id ? { ...c, ...u } : c));
-    await supabase.from('customers').update(u).eq('id', id);
+    const { error } = await supabase.from('customers').update(u).eq('id', id);
+    if (error) { console.error('updateCustomer failed:', error.message, u); setDbError(`Customer update failed: ${error.message}`); }
   };
   const deleteCustomer = async (id: string) => {
     setCustomers(prev => prev.filter(c => c.id !== id));
@@ -617,10 +702,10 @@ export function useMandiStore() {
     setCustomers(prev => prev.map(c => c.id === customerId
       ? { ...c, sales: c.sales.map(s => s.id === saleId ? { ...s, ...u } : s) } : c));
     const dbU: any = {};
-    if (u.date !== undefined) dbU.date = u.date;
+    if (u.date !== undefined) dbU.date = u.date || null;
     if (u.crates !== undefined) dbU.crates = u.crates;
     if (u.rate !== undefined) dbU.rate = u.rate;
-    if (u.billNo !== undefined) dbU.bill_no = u.billNo;
+    if (u.billNo !== undefined) dbU.bill_no = u.billNo || null;
     if (u.commPercent !== undefined) dbU.comm_percent = u.commPercent;
     if (u.wariRate !== undefined) dbU.wari_rate = u.wariRate;
     if (u.advance !== undefined) dbU.advance = u.advance;
@@ -628,7 +713,7 @@ export function useMandiStore() {
     if (u.discount !== undefined) dbU.discount = u.discount;
     if (u.paymentMode !== undefined) dbU.payment_mode = u.paymentMode;
     const { error } = await supabase.from('customer_sales').update(dbU).eq('id', saleId);
-    if (error) { console.error('updateCustomerSale failed:', error.message, dbU); setDbError(`Sale update failed: ${error.message}`); }
+    if (error) { console.error('[DB] updateCustomerSale failed:', error.message, dbU); setDbError(`Sale update failed: ${error.message}`); }
   };
   const deleteCustomerSale = async (customerId: string, saleId: string) => {
     setCustomers(prev => prev.map(c => c.id === customerId
@@ -639,17 +724,19 @@ export function useMandiStore() {
     const row: CustomerPayment = { ...payment, id: genId(), customerId, ...getMeta() };
     setCustomers(prev => prev.map(c => c.id === customerId ? { ...c, payments: [...c.payments, row] } : c));
     const { error } = await supabase.from('customer_payments').insert(customerPaymentToRow(row));
-    if (error) console.error('addPaymentToCustomer failed:', error.message);
+    if (error) { console.error('[DB] addPaymentToCustomer failed:', error.message); setDbError(`Payment save failed: ${error.message}`); }
   };
   const updateCustomerPayment = async (customerId: string, paymentId: string, u: Partial<CustomerPayment>) => {
     setCustomers(prev => prev.map(c => c.id === customerId
       ? { ...c, payments: c.payments.map(p => p.id === paymentId ? { ...p, ...u } : p) } : c));
     const dbU: any = {};
     if (u.amount !== undefined) dbU.amount = u.amount;
-    if (u.date !== undefined) dbU.date = u.date;
+    if (u.date !== undefined) dbU.date = u.date || null;
     if (u.method !== undefined) dbU.method = u.method;
+    if (u.accountNo !== undefined) dbU.account_no = u.accountNo || null;
+    if (u.accountHolderName !== undefined) dbU.account_holder_name = u.accountHolderName || null;
     const { error } = await supabase.from('customer_payments').update(dbU).eq('id', paymentId);
-    if (error) { console.error('updateCustomerPayment failed:', error.message, dbU); setDbError(`Payment update failed: ${error.message}`); }
+    if (error) { console.error('[DB] updateCustomerPayment failed:', error.message, dbU); setDbError(`Payment update failed: ${error.message}`); }
   };
   const deleteCustomerPayment = async (customerId: string, paymentId: string) => {
     setCustomers(prev => prev.map(c => c.id === customerId
@@ -669,12 +756,12 @@ export function useMandiStore() {
     setCustomers(prev => prev.map(c => c.id === customerId
       ? { ...c, returns: (c.returns || []).map(r => r.id === returnId ? { ...r, ...u } : r) } : c));
     const dbU: any = {};
-    if (u.date !== undefined) dbU.date = u.date;
+    if (u.date !== undefined) dbU.date = u.date || null;
     if (u.crates !== undefined) dbU.crates = u.crates;
     if (u.newCost !== undefined) dbU.new_cost = u.newCost;
-    if (u.remarks !== undefined) dbU.remarks = u.remarks;
+    if (u.remarks !== undefined) dbU.remarks = u.remarks || null;
     const { error } = await supabase.from('customer_returns').update(dbU).eq('id', returnId);
-    if (error) console.error('[DB] update return failed:', error.message);
+    if (error) { console.error('[DB] update return failed:', error.message); setDbError(`Return update failed: ${error.message}`); }
   };
   const deleteCustomerReturn = async (customerId: string, returnId: string) => {
     setCustomers(prev => prev.map(c => c.id === customerId
@@ -701,12 +788,13 @@ export function useMandiStore() {
   // ── Aggregates ──
   const totalExpenses = expenses.reduce((s, e) => s + e.amount, 0);
 
-  // Revenue = all commissions + all wari (supplier + customer)
-  const totalSupplierComm = suppliers.reduce((s, sp) => s + sp.trucks.reduce((ss, t) => ss + calcTruckCommission(t), 0), 0);
-  const totalSupplierWari = suppliers.reduce((s, sp) => s + sp.trucks.reduce((ss, t) => ss + calcTruckCashWari(t), 0), 0);
+  // Revenue = supplier labour + supplier carriage + customer commissions + customer wari
+  const totalSupplierLabour = suppliers.reduce((s, sup) => s + sup.trucks.reduce((ss, t) => ss + (t.labourCharges ?? 0), 0), 0);
+  const totalSupplierCarriage = suppliers.reduce((s, sup) => s + sup.trucks.reduce((ss, t) => ss + (t.carriage ?? 0), 0), 0);
   const totalCustomerComm = customers.reduce((s, c) => s + c.sales.reduce((ss, sl) => ss + calcSaleCommission(sl), 0), 0);
   const totalCustomerWari = customers.reduce((s, c) => s + c.sales.reduce((ss, sl) => ss + calcSaleCashWari(sl), 0), 0);
-  const totalRevenue = totalSupplierComm + totalSupplierWari + totalCustomerComm + totalCustomerWari;
+  
+  const totalRevenue = totalSupplierLabour + totalSupplierCarriage + totalCustomerComm + totalCustomerWari;
 
   const totalSales = customers.reduce((s, c) => s + c.sales.reduce((ss, sl) => ss + calcSaleTotal(sl), 0), 0);
   const totalPurchases = suppliers.reduce((s, sp) => s + sp.trucks.reduce((ss, t) => ss + calcTruckTotal(t), 0), 0);
@@ -721,9 +809,9 @@ export function useMandiStore() {
   const totalInvestorShare = Math.round(investors.reduce((s, inv) => s + Math.max(0, afterCharity) * inv.sharePercent / 100, 0));
   const totalPartnerShare = Math.round(partners.reduce((s, p) => s + Math.max(0, afterCharity) * p.sharePercent / 100, 0));
 
-  // Net profit = what remains after all deductions
+  // Net profit = what remains after investor deductions
   const totalProfit = grossProfit;
-  const netProfit = afterCharity - totalInvestorShare - totalPartnerShare;
+  const netProfit = afterCharity - totalInvestorShare;
   const turnover = totalSales;
 
   return {
@@ -742,7 +830,7 @@ export function useMandiStore() {
     addUser, deleteUser, setAndSaveActiveUser, getNextBillNo,
     totalExpenses, totalRevenue, totalSales, totalPurchases,
     totalProfit, charity, netProfit, turnover,
-    totalSupplierComm, totalSupplierWari, totalCustomerComm, totalCustomerWari,
+    totalSupplierLabour, totalSupplierCarriage, totalCustomerComm, totalCustomerWari,
     grossProfit, afterCharity, totalInvestorShare, totalPartnerShare,
   };
 }
