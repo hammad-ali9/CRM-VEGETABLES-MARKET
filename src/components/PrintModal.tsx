@@ -10,11 +10,11 @@ interface PrintModalProps {
 const PrintModal: React.FC<PrintModalProps> = ({ title, onClose, onPrint }) => {
   const [selected, setSelected] = useState<'daily' | 'weekly' | 'monthly' | 'all'>('monthly');
 
-  const options: { value: 'daily' | 'weekly' | 'monthly' | 'all'; label: string; urdu: string; desc: string }[] = [
-    { value: 'daily',   label: 'Daily',   urdu: 'ڈیلی',    desc: "Today's records only" },
-    { value: 'weekly',  label: 'Weekly',  urdu: 'ویکلی',   desc: 'Current week (Mon–Sun)' },
-    { value: 'monthly', label: 'Monthly', urdu: 'منتھلی',  desc: 'Current calendar month' },
-    { value: 'all',     label: 'All Time',urdu: 'تمام',    desc: 'Complete history' },
+  const options: { value: 'daily' | 'weekly' | 'monthly' | 'all'; label: string; desc: string }[] = [
+    { value: 'daily',   label: 'یومیہ',     desc: 'صرف آج کے ریکارڈ' },
+    { value: 'weekly',  label: 'ہفتہ وار',  desc: 'موجودہ ہفتے کے ریکارڈ' },
+    { value: 'monthly', label: 'ماہانہ',    desc: 'موجودہ مہینے کے ریکارڈ' },
+    { value: 'all',     label: 'کل وقت',    desc: 'مکمل تاریخ' },
   ];
 
   return (
@@ -26,7 +26,7 @@ const PrintModal: React.FC<PrintModalProps> = ({ title, onClose, onPrint }) => {
         </div>
         <div className="modal-body">
           <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: 16 }}>
-            پرنٹ کی مدت منتخب کریں (Select print period)
+            پرنٹ کی مدت منتخب کریں
           </p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {options.map(opt => (
@@ -48,7 +48,7 @@ const PrintModal: React.FC<PrintModalProps> = ({ title, onClose, onPrint }) => {
                   {selected === opt.value && <div style={{ width: 7, height: 7, borderRadius: '50%', background: 'white' }} />}
                 </div>
                 <div>
-                  <span style={{ fontWeight: 600 }}>{opt.urdu} ({opt.label})</span>
+                  <span style={{ fontWeight: 600 }}>{opt.label}</span>
                   <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: 0 }}>{opt.desc}</p>
                 </div>
               </label>
@@ -56,9 +56,9 @@ const PrintModal: React.FC<PrintModalProps> = ({ title, onClose, onPrint }) => {
           </div>
         </div>
         <div className="modal-footer">
-          <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button type="button" className="btn btn-ghost" onClick={onClose}>منسوخ</button>
           <button type="button" className="btn btn-primary" onClick={() => onPrint(selected)}>
-            <Printer size={15} /> پرنٹ کریں (Print)
+            <Printer size={15} /> پرنٹ کریں
           </button>
         </div>
       </div>

@@ -385,6 +385,13 @@ ul { list-style: none; }
   gap: 0;
   border-bottom: 1px solid var(--border);
   margin-bottom: 24px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .tab {
@@ -395,6 +402,7 @@ ul { list-style: none; }
   border-bottom: 2px solid transparent;
   transition: all var(--transition-fast);
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .tab:hover {
@@ -487,12 +495,6 @@ ul { list-style: none; }
 }
 
 /* ── Responsive ── */
-@media (max-width: 1024px) {
-  :root {
-    --sidebar-width: 72px;
-  }
-}
-
 @media (max-width: 768px) {
   :root {
     --sidebar-width: 0px;

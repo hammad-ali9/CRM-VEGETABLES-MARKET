@@ -66,7 +66,7 @@ function AppContent() {
   if (!isAuthenticated) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--background)' }}>
-        <div className="glass-card" style={{ width: 420, padding: 40, textAlign: 'center' }}>
+        <div className="glass-card login-card" style={{ width: '90%', maxWidth: 420, padding: 40, textAlign: 'center' }}>
           <h2 style={{ marginBottom: 4, fontSize: '1.4rem' }}>Abbasi & Co</h2>
           <p style={{ fontWeight: 600, marginBottom: 4 }}>Tomato Trading Management System</p>
           <p style={{ color: 'var(--text-secondary)', marginBottom: 28, fontSize: '0.8rem' }}>ٹماٹر تجارت مینجمنٹ سسٹم</p>

@@ -52,6 +52,7 @@ export interface TruckRecord {
   advanceDate: string;    // تاریخ بیانہ (Advance Date)
   bardana: number;        // باردانہ / ایڈوانس (Bardana Advance)
   bardanaDate: string;    // تاریخ باردانہ (Bardana Date)
+  totalCrates?: number;   // max capacity — parties.crates must not exceed this
   parties: TruckParty[];
   paymentMode: 'Cash' | 'Credit'; // how the supplier was paid
   remarks?: string;
@@ -149,7 +150,8 @@ export interface AppUser {
 // ============================================
 
 export const CASH_WARI_CUSTOMER = 5;  // Rs per crate (requirement: 5)
-export const CUSTOMER_COMMISSION_PERCENT = 7.25;
+export const CUSTOMER_COMMISSION_DIVISOR = 13.78; // commission = totalValue / 13.78
+export const CUSTOMER_COMMISSION_PERCENT = 7.25;  // kept for display reference only
 export const CHARITY_PERCENT = 10;
 
 // ============================================
@@ -219,7 +221,9 @@ export function calcSupplierBalance(s: Supplier) {
 }
 export function calcSaleTotal(sale: CustomerSale) { return sale.crates * sale.rate; }
 export function calcSaleCommission(sale: CustomerSale) {
-  return Math.round(calcSaleTotal(sale) * (sale.commPercent ?? CUSTOMER_COMMISSION_PERCENT) / 100);
+  // Commission = totalValue / 13.78 (fixed divisor, no percentage input)
+  const totalValue = calcSaleTotal(sale);
+  return Math.round(totalValue / CUSTOMER_COMMISSION_DIVISOR);
 }
 export function calcSaleCashWari(sale: CustomerSale) {
   return sale.crates * (sale.wariRate ?? CASH_WARI_CUSTOMER);
@@ -284,6 +288,7 @@ function mapTruck(r: any): TruckRecord {
     saleDate: r.sale_date || '',
     advance: r.advance ?? 0, advanceDate: r.advance_date || '',
     bardana: r.bardana ?? 0, bardanaDate: r.bardana_date || '',
+    totalCrates: r.total_crates ?? undefined,
     parties: r.parties || [], paymentMode: r.payment_mode ?? 'Credit',
     remarks: r.remarks || '',
     addedBy: r.added_by, addedAtStr: r.added_at_str,

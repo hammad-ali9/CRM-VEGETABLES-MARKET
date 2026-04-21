@@ -221,7 +221,7 @@ const AccountsModule: React.FC = () => {
       {/* ======================= EXPENSES TAB ======================= */}
       {activeTab === 'expenses' && (
         <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, gap: 12, flexWrap: 'wrap' }}>
              <div className="search-bar" style={{ flex: 1, maxWidth: 400 }}>
                 <Search className="search-icon" size={15} />
                 <input 
@@ -273,7 +273,7 @@ const AccountsModule: React.FC = () => {
            </div>
            <div className="content-grid cols-3">
               {store.investors.map(i => {
-                const profitCalc = Math.round((store.netProfit * i.sharePercent) / 100);
+                const profitCalc = Math.round(Math.max(0, store.afterCharity) * i.sharePercent / 100);
                 return (
                 <div key={i.id} className="glass-card" style={{ padding: 20 }}>
                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
@@ -312,7 +312,7 @@ const AccountsModule: React.FC = () => {
            </div>
            <div className="content-grid cols-3">
               {store.partners.map(p => {
-                const profitCalc = Math.round((store.netProfit * p.sharePercent) / 100);
+                const profitCalc = Math.round(Math.max(0, store.afterCharity) * p.sharePercent / 100);
                 return (
                 <div key={p.id} className="glass-card" style={{ padding: 20 }}>
                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>

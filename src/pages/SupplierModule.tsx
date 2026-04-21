@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useStore, calcSupplierBalance, calcTruckTotal, calcSupplierGrossTotal, calcSupplierTotalReceived, type Supplier, type TruckRecord } from '../store';
-import { Plus, ArrowLeft, Truck, MapPin, Search, X, Edit2, Trash2, Download, Printer, DollarSign } from 'lucide-react';
+import { Plus, ArrowLeft, Truck, MapPin, Search, X, Edit2, Trash2, Download, Printer, DollarSign, ChevronDown, ChevronRight, Users } from 'lucide-react';
 import { downloadCSV } from '../utils/exportUtils';
 import PrintModal from '../components/PrintModal';
 import { isWithinPrintPeriod, getPeriodLabel, type PrintPeriod } from '../utils/printUtils';
@@ -12,6 +12,82 @@ const SupplierModule: React.FC = () => {
   const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showPrintModal, setShowPrintModal] = useState(false);
+  const [expandedTruckId, setExpandedTruckId] = useState<string | null>(null);
+
+  // Inline quick-add purchase state (inside expanded row)
+  const [purchaseTruckId, setPurchaseTruckId] = useState<string | null>(null);
+  const [purchaseForm, setPurchaseForm] = useState({
+    buyerName: '', crates: 0, rate: 0,
+    date: new Date().toISOString().split('T')[0], billNo: '',
+  });
+  const [purchaseSaving, setPurchaseSaving] = useState(false);
+  // Capacity edit state (set totalCrates on a truck)
+  const [capacityTruckId, setCapacityTruckId] = useState<string | null>(null);
+  const [capacityInput, setCapacityInput] = useState(0);
+
+  const getTruckCapacity = (truckId: string): number | undefined => {
+    const v = localStorage.getItem(`truck_cap_${truckId}`);
+    return v !== null ? Number(v) : undefined;
+  };
+
+  const handleSaveCapacity = (truck: TruckRecord) => {
+    if (capacityInput < truck.parties.reduce((s, p) => s + p.crates, 0)) return;
+    localStorage.setItem(`truck_cap_${truck.id}`, String(capacityInput));
+    setCapacityTruckId(null);
+    // Force re-render by toggling expand
+    setExpandedTruckId(null);
+    setTimeout(() => setExpandedTruckId(truck.id), 0);
+  };
+
+  const handleAddPurchase = async (truck: TruckRecord) => {
+    if (!selectedSupplierId || purchaseSaving) return;
+    const cap = truck.totalCrates ?? 0;
+    const allocated = truck.parties.reduce((s, p) => s + p.crates, 0);
+    const remaining = cap - allocated;
+    if (purchaseForm.crates <= 0) return;
+    if (purchaseForm.crates > remaining) {
+      alert(`صرف ${remaining} کریٹس باقی ہیں۔ (Only ${remaining} crates remaining.)`);
+      return;
+    }
+    setPurchaseSaving(true);
+    try {
+      const newParty = {
+        id: Math.random().toString(),
+        personName: purchaseForm.buyerName,
+        crates: Number(purchaseForm.crates),
+        rate: Number(purchaseForm.rate),
+      };
+      const updatedParties = [...truck.parties, newParty];
+      await store.updateTruck(selectedSupplierId, truck.id, { parties: updatedParties });
+
+      // Also create a CustomerSale if buyer matches a customer
+      const matched = store.customers.find(c =>
+        c.name.trim().toLowerCase() === purchaseForm.buyerName.trim().toLowerCase()
+      );
+      if (matched) {
+        await store.addSaleToCustomer(matched.id, {
+          date: purchaseForm.date,
+          crates: Number(purchaseForm.crates),
+          rate: Number(purchaseForm.rate),
+          billNo: purchaseForm.billNo || store.getNextBillNo(),
+          commPercent: 7.25,
+          wariRate: 5,
+          advance: 0,
+          advanceMethod: 'Cash',
+          discount: 0,
+          paymentMode: 'Credit',
+        });
+      }
+
+      setPurchaseForm({ buyerName: '', crates: 0, rate: 0, date: new Date().toISOString().split('T')[0], billNo: '' });
+      setPurchaseTruckId(null);
+    } catch (err) {
+      console.error('Failed to add purchase:', err);
+      alert('خرابی: محفوظ نہ ہو سکا۔');
+    } finally {
+      setPurchaseSaving(false);
+    }
+  };
 
   // Unified Entry State
   const [isAddingEntry, setIsAddingEntry] = useState(false);
@@ -340,29 +416,29 @@ const SupplierModule: React.FC = () => {
     const totalCratesAll = printData.reduce((s, sup) => s + sup.trucks.reduce((ss, t) => ss + t.parties.reduce((ps, p) => ps + p.crates, 0), 0), 0);
 
     openPrintWindow({
-      title: 'Supplier Ledger (بیوپاری لیجر)',
-      subtitle: `${printData.length} supplier(s) · ${totalCratesAll.toLocaleString()} crates`,
+      title: 'بیوپاری لیجر',
+      subtitle: `${printData.length} بیوپاری · ${totalCratesAll.toLocaleString()} کریٹس`,
       periodLabel,
       columns: [
-        { label: 'Supplier', urdu: 'بیوپاری' },
-        { label: 'City', urdu: 'شہر' },
-        { label: 'Date', urdu: 'تاریخ' },
-        { label: 'Truck No', urdu: 'ٹرک نمبر' },
-        { label: 'Party', urdu: 'مالک' },
-        { label: 'Crates', urdu: 'کریٹس', align: 'right' },
-        { label: 'Rate', urdu: 'ریٹ', align: 'right' },
-        { label: 'Gross', urdu: 'کل رقم', align: 'right' },
-        { label: 'Advance', urdu: 'بیانہ', align: 'right' },
-        { label: 'Carriage', urdu: 'کیریج', align: 'right' },
-        { label: 'Net', urdu: 'خالص', align: 'right' },
-        { label: 'Mode', urdu: 'طریقہ' },
+        { label: 'بیوپاری' },
+        { label: 'شہر' },
+        { label: 'تاریخ' },
+        { label: 'ٹرک نمبر' },
+        { label: 'مالک' },
+        { label: 'کریٹس', align: 'right' },
+        { label: 'ریٹ', align: 'right' },
+        { label: 'کل رقم', align: 'right' },
+        { label: 'بیانہ', align: 'right' },
+        { label: 'کیریج', align: 'right' },
+        { label: 'خالص', align: 'right' },
+        { label: 'طریقہ' },
       ],
       rows,
       summaryRows: [
-        { label: 'Total Crates (کل کریٹس)', value: totalCratesAll.toLocaleString() },
-        { label: 'Gross Total (کل رقم)', value: `Rs. ${totalGross.toLocaleString()}`, bold: true },
+        { label: 'کل کریٹس', value: totalCratesAll.toLocaleString() },
+        { label: 'کل رقم', value: `Rs. ${totalGross.toLocaleString()}`, bold: true },
       ],
-      emptyMessage: 'No supplier records for this period',
+      emptyMessage: 'اس دور میں کوئی ریکارڈ نہیں',
     });
   };
 
@@ -388,28 +464,28 @@ const SupplierModule: React.FC = () => {
     const totalBalance = calcSupplierBalance(sup);
 
     openPrintWindow({
-      title: `Supplier Ledger — ${sup.name}`,
-      subtitle: `${sup.city} · ${totalCratesAll.toLocaleString()} crates`,
-      periodLabel: 'All Time',
+      title: `بیوپاری لیجر — ${sup.name}`,
+      subtitle: `${sup.city} · ${totalCratesAll.toLocaleString()} کریٹس`,
+      periodLabel: 'کل وقت',
       columns: [
-        { label: 'Date', urdu: 'تاریخ' },
-        { label: 'Truck No', urdu: 'ٹرک نمبر' },
-        { label: 'Party', urdu: 'مالک' },
-        { label: 'Crates', urdu: 'کریٹس', align: 'right' },
-        { label: 'Rate', urdu: 'ریٹ', align: 'right' },
-        { label: 'Gross', urdu: 'کل رقم', align: 'right' },
-        { label: 'Advance', urdu: 'بیانہ', align: 'right' },
-        { label: 'Carriage', urdu: 'کیریج', align: 'right' },
-        { label: 'Net', urdu: 'خالص', align: 'right' },
-        { label: 'Mode', urdu: 'طریقہ' },
+        { label: 'تاریخ' },
+        { label: 'ٹرک نمبر' },
+        { label: 'مالک' },
+        { label: 'کریٹس', align: 'right' },
+        { label: 'ریٹ', align: 'right' },
+        { label: 'کل رقم', align: 'right' },
+        { label: 'بیانہ', align: 'right' },
+        { label: 'کیریج', align: 'right' },
+        { label: 'خالص', align: 'right' },
+        { label: 'طریقہ' },
       ],
       rows,
       summaryRows: [
-        { label: 'Total Crates (کل کریٹس)', value: totalCratesAll.toLocaleString() },
-        { label: 'Gross Total (کل رقم)', value: rs(totalGross) },
-        { label: 'Remaining Balance (بقایہ)', value: rs(totalBalance), bold: true, color: totalBalance > 0 ? '#dc2626' : '#16a34a' },
+        { label: 'کل کریٹس', value: totalCratesAll.toLocaleString() },
+        { label: 'کل رقم', value: rs(totalGross) },
+        { label: 'بقایہ', value: rs(totalBalance), bold: true, color: totalBalance > 0 ? '#dc2626' : '#16a34a' },
       ],
-      emptyMessage: 'No records for this supplier',
+      emptyMessage: 'کوئی ریکارڈ نہیں',
     });
   };
 
@@ -474,6 +550,7 @@ const SupplierModule: React.FC = () => {
                 <table className="data-table">
                   <thead>
                     <tr>
+                      <th style={{ width: '32px' }}></th>
                       <th style={{ width: '150px' }}>Truck / Builty</th>
                       <th style={{ width: '110px' }}>Loading Date</th>
                       <th>Parties / Owners</th>
@@ -487,39 +564,293 @@ const SupplierModule: React.FC = () => {
                     {selectedSupplier.trucks.map(truck => {
                       const truckTotalCrates = truck.parties.reduce((sum, p) => sum + p.crates, 0);
                       const truckGrossValue = calcTruckTotal(truck);
-                      const truckNetPayable = truckGrossValue - (truck.labourCharges || 0) - (truck.carriage || 0) - (truck.truckFare || 0) - (truck.advance || 0);
+                      const truckNetPayable = truckGrossValue - (truck.labourCharges || 0) - (truck.carriage || 0) - (truck.truckFare || 0) - (truck.advance || 0) - (truck.bardana || 0);
                       const ownersList = truck.parties.map(p => p.personName).join(', ');
+                      const isExpanded = expandedTruckId === truck.id;
 
                       return (
-                        <tr key={truck.id} style={{ transition: 'all 0.2s' }}>
-                          <td>
-                            <div style={{ fontWeight: 700, color: 'var(--blue)' }}>{truck.truckNo}</div>
-                            <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>B: {truck.builtyNo || 'N/A'}</div>
-                          </td>
-                          <td style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
-                            {truck.loadingDate}
-                          </td>
-                          <td style={{ fontSize: '0.85rem', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={ownersList}>
-                            {ownersList || 'No owners'}
-                            {truck.remarks && <div style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)', fontStyle: 'italic' }}>{truck.remarks}</div>}
-                          </td>
-                          <td style={{ textAlign: 'right', fontWeight: 600 }}>{truckTotalCrates}</td>
-                          <td style={{ textAlign: 'right', fontWeight: 500 }}>{fmt(truckGrossValue)}</td>
-                          <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--blue)' }}>
-                            {fmt(truckNetPayable)}
-                            {truck.advance > 0 && <div style={{ fontSize: '0.7rem', color: 'var(--green)' }}>Adv: {fmt(truck.advance)}</div>}
-                          </td>
-                          <td>
-                            <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
-                              <button className="btn btn-secondary" style={{ padding: 6 }} onClick={() => openEditTruck(truck)} title="Edit Truck"><Edit2 size={12} /></button>
-                              <button className="btn btn-secondary" style={{ padding: 6, color: 'var(--red)' }} onClick={() => { if (confirm('Delete this truck?')) store.deleteTruck(selectedSupplier.id, truck.id) }} title="Delete Truck"><Trash2 size={12} /></button>
-                            </div>
-                          </td>
-                        </tr>
+                        <React.Fragment key={truck.id}>
+                          <tr
+                            style={{ transition: 'all 0.2s', cursor: 'pointer', background: isExpanded ? 'rgba(0,122,255,0.04)' : undefined }}
+                            onClick={() => setExpandedTruckId(isExpanded ? null : truck.id)}
+                          >
+                            <td style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>
+                              {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                            </td>
+                            <td>
+                              <div style={{ fontWeight: 700, color: 'var(--blue)' }}>{truck.truckNo}</div>
+                              <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>B: {truck.builtyNo || 'N/A'}</div>
+                            </td>
+                            <td style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+                              {truck.loadingDate}
+                            </td>
+                            <td style={{ fontSize: '0.85rem', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={ownersList}>
+                              {ownersList || 'No owners'}
+                              {truck.remarks && <div style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)', fontStyle: 'italic' }}>{truck.remarks}</div>}
+                            </td>
+                            <td style={{ textAlign: 'right', fontWeight: 600 }}>{truckTotalCrates}</td>
+                            <td style={{ textAlign: 'right', fontWeight: 500 }}>{fmt(truckGrossValue)}</td>
+                            <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--blue)' }}>
+                              {fmt(truckNetPayable)}
+                              {truck.advance > 0 && <div style={{ fontSize: '0.7rem', color: 'var(--green)' }}>Adv: {fmt(truck.advance)}</div>}
+                            </td>
+                            <td onClick={e => e.stopPropagation()}>
+                              <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
+                                <button className="btn btn-secondary" style={{ padding: 6 }} onClick={() => openEditTruck(truck)} title="Edit Truck"><Edit2 size={12} /></button>
+                                <button className="btn btn-secondary" style={{ padding: 6, color: 'var(--red)' }} onClick={() => { if (confirm('Delete this truck?')) store.deleteTruck(selectedSupplier.id, truck.id) }} title="Delete Truck"><Trash2 size={12} /></button>
+                              </div>
+                            </td>
+                          </tr>
+
+                          {isExpanded && (() => {
+                            const cap = getTruckCapacity(truck.id) ?? 0;
+                            const remaining = cap - truckTotalCrates;
+                            const pct = cap > 0 ? Math.min(100, Math.round((truckTotalCrates / cap) * 100)) : 0;
+                            const isAddingForThis = purchaseTruckId === truck.id;
+                            const isSettingCap = capacityTruckId === truck.id;
+
+                            return (
+                            <tr>
+                              <td colSpan={8} style={{ padding: 0, background: 'rgba(0,0,0,0.015)' }}>
+                                <div style={{ padding: '14px 16px 18px 40px', borderTop: '2px solid var(--blue)', borderBottom: '1px solid var(--border)' }}>
+
+                                  {/* Header */}
+                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                      <Users size={13} style={{ color: 'var(--blue)' }} />
+                                      <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--blue)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                        کریٹ فروخت — Sale Breakdown ({truck.parties.length} {truck.parties.length === 1 ? 'Party' : 'Parties'})
+                                      </span>
+                                    </div>
+
+                                    {/* Capacity bar */}
+                                    {getTruckCapacity(truck.id) ? (
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.75rem' }}>
+                                          <span style={{ color: 'var(--text-secondary)' }}>مختص:</span>
+                                          <span style={{ fontWeight: 700 }}>{truckTotalCrates}</span>
+                                          <span style={{ color: 'var(--text-tertiary)' }}>/</span>
+                                          <span style={{ fontWeight: 700 }}>{cap}</span>
+                                          <span style={{ color: 'var(--text-secondary)' }}>کریٹس</span>
+                                          <button style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)', background: 'none', border: 'none', cursor: 'pointer', padding: '0 4px' }}
+                                            onClick={e => { e.stopPropagation(); setCapacityTruckId(isSettingCap ? null : truck.id); setCapacityInput(cap); }}>
+                                            ✏
+                                          </button>
+                                        </div>
+                                        <div style={{ width: 80, height: 6, background: 'var(--border)', borderRadius: 3, overflow: 'hidden' }}>
+                                          <div style={{ height: '100%', width: `${pct}%`, background: remaining === 0 ? 'var(--green)' : remaining < 0 ? 'var(--red)' : 'var(--blue)', borderRadius: 3, transition: 'width 0.3s' }} />
+                                        </div>
+                                        <span style={{ fontSize: '0.72rem', fontWeight: 600, color: remaining > 0 ? 'var(--blue)' : remaining === 0 ? 'var(--green)' : 'var(--red)' }}>
+                                          {remaining > 0 ? `${remaining} باقی` : remaining === 0 ? '✓ مکمل' : `${Math.abs(remaining)} اضافہ`}
+                                        </span>
+                                      </div>
+                                    ) : (
+                                      <button
+                                        className="btn btn-secondary"
+                                        style={{ fontSize: '0.72rem', padding: '4px 10px' }}
+                                        onClick={e => { e.stopPropagation(); setCapacityTruckId(isSettingCap ? null : truck.id); setCapacityInput(truckTotalCrates); }}
+                                      >
+                                        + کل کریٹس مقرر کریں (Set Total)
+                                      </button>
+                                    )}
+                                  </div>
+
+                                  {/* Set capacity inline form */}
+                                  {isSettingCap && (
+                                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 14, padding: '10px 12px', background: 'rgba(0,122,255,0.06)', borderRadius: 8, border: '1px solid rgba(0,122,255,0.2)' }}
+                                      onClick={e => e.stopPropagation()}>
+                                      <label style={{ fontSize: '0.8rem', fontWeight: 600, whiteSpace: 'nowrap' }}>ٹرک کل کریٹس:</label>
+                                      <input
+                                        type="number" min={truckTotalCrates}
+                                        className="form-control" style={{ width: 100, padding: '4px 8px', fontSize: '0.85rem' }}
+                                        value={capacityInput || ''}
+                                        onChange={e => setCapacityInput(Number(e.target.value))}
+                                      />
+                                      <button className="btn btn-primary" style={{ padding: '4px 12px', fontSize: '0.8rem' }}
+                                        onClick={() => handleSaveCapacity(truck)}>محفوظ</button>
+                                      <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: '0.8rem' }}
+                                        onClick={() => setCapacityTruckId(null)}>منسوخ</button>
+                                      {capacityInput < truckTotalCrates && (
+                                        <span style={{ fontSize: '0.72rem', color: 'var(--red)' }}>کم از کم {truckTotalCrates} ہونا چاہیے</span>
+                                      )}
+                                    </div>
+                                  )}
+
+                                  {/* Parties table */}
+                                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                                    <thead>
+                                      <tr style={{ background: 'rgba(0,122,255,0.05)' }}>
+                                        <th style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 600, color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>#</th>
+                                        <th style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 600, color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>خریدار (Buyer)</th>
+                                        <th style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 600, color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>کریٹس</th>
+                                        <th style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 600, color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>ریٹ</th>
+                                        <th style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 600, color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>کل رقم</th>
+                                        <th style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 600, color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)' }}>خریدار ریکارڈ</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {truck.parties.map((party, idx) => {
+                                        const partyTotal = party.crates * party.rate;
+                                        const matchedCustomer = store.customers.find(c =>
+                                          c.name.trim().toLowerCase() === party.personName.trim().toLowerCase()
+                                        );
+                                        const crateShare = truckTotalCrates > 0 ? Math.round((party.crates / truckTotalCrates) * 100) : 0;
+                                        return (
+                                          <tr key={party.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                                            <td style={{ padding: '8px 10px', color: 'var(--text-tertiary)' }}>{idx + 1}</td>
+                                            <td style={{ padding: '8px 10px', fontWeight: 600 }}>{party.personName}</td>
+                                            <td style={{ padding: '8px 10px', textAlign: 'right' }}>
+                                              <span style={{ fontWeight: 700 }}>{party.crates.toLocaleString()}</span>
+                                              <span style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)', marginLeft: 4 }}>({crateShare}%)</span>
+                                            </td>
+                                            <td style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--text-secondary)' }}>Rs. {party.rate.toLocaleString()}</td>
+                                            <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700, color: 'var(--green)' }}>Rs. {partyTotal.toLocaleString()}</td>
+                                            <td style={{ padding: '8px 10px' }}>
+                                              {matchedCustomer ? (
+                                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.72rem', fontWeight: 600, padding: '2px 8px', borderRadius: 20, background: 'rgba(52,199,89,0.12)', color: 'var(--green)' }}>
+                                                  ✓ {matchedCustomer.name}{matchedCustomer.nickname && <span style={{ opacity: 0.7 }}>({matchedCustomer.nickname})</span>}
+                                                </span>
+                                              ) : (
+                                                <span style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)' }}>— Not linked</span>
+                                              )}
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                    <tfoot>
+                                      <tr style={{ background: 'rgba(0,0,0,0.03)', fontWeight: 700 }}>
+                                        <td colSpan={2} style={{ padding: '8px 10px', fontSize: '0.8rem' }}>کل مجموعہ</td>
+                                        <td style={{ padding: '8px 10px', textAlign: 'right' }}>{truckTotalCrates.toLocaleString()}</td>
+                                        <td></td>
+                                        <td style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--green)' }}>Rs. {truckGrossValue.toLocaleString()}</td>
+                                        <td></td>
+                                      </tr>
+                                      {(truck.labourCharges > 0 || truck.carriage > 0 || truck.truckFare > 0) && (
+                                        <tr style={{ background: 'rgba(255,59,48,0.04)' }}>
+                                          <td colSpan={4} style={{ padding: '6px 10px', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                                            کٹوتیاں: مزدوری {fmt(truck.labourCharges || 0)} + کیریج {fmt(truck.carriage || 0)} + ٹرک کرایہ {fmt(truck.truckFare || 0)}
+                                            {truck.advance > 0 && ` + بیانہ ${fmt(truck.advance)}`}
+                                            {truck.bardana > 0 && ` + باردانہ ${fmt(truck.bardana)}`}
+                                          </td>
+                                          <td style={{ padding: '6px 10px', textAlign: 'right', color: 'var(--red)', fontWeight: 700 }}>
+                                            -{fmt((truck.labourCharges || 0) + (truck.carriage || 0) + (truck.truckFare || 0) + (truck.advance || 0) + (truck.bardana || 0))}
+                                          </td>
+                                          <td></td>
+                                        </tr>
+                                      )}
+                                    </tfoot>
+                                  </table>
+
+                                  {/* Add Purchase section */}
+                                  <div style={{ marginTop: 14 }} onClick={e => e.stopPropagation()}>
+                                    {!getTruckCapacity(truck.id) ? (
+                                      <p style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', fontStyle: 'italic' }}>
+                                        نئی خریداری شامل کرنے کے لیے پہلے "کل کریٹس مقرر کریں" پر کلک کریں۔
+                                      </p>
+                                    ) : remaining <= 0 ? (
+                                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 20, background: 'rgba(52,199,89,0.1)', color: 'var(--green)', fontSize: '0.75rem', fontWeight: 600 }}>
+                                        ✓ تمام {cap} کریٹس مختص — مزید خریداری ممکن نہیں
+                                      </div>
+                                    ) : isAddingForThis ? (
+                                      <div style={{ padding: '14px', background: 'rgba(0,122,255,0.04)', borderRadius: 10, border: '1px dashed rgba(0,122,255,0.3)' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                                          <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--blue)' }}>
+                                            + نئی خریداری — باقی: <strong>{remaining}</strong> کریٹس
+                                          </span>
+                                          <button className="topbar-icon-btn" onClick={() => setPurchaseTruckId(null)}><X size={14} /></button>
+                                        </div>
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 8, marginBottom: 10 }}>
+                                          <div className="form-group" style={{ margin: 0 }}>
+                                            <label style={{ fontSize: '0.72rem' }}>خریدار کا نام *</label>
+                                            <input
+                                              className="form-control" style={{ padding: '5px 8px', fontSize: '0.82rem' }}
+                                              list={`buyers-${truck.id}`}
+                                              value={purchaseForm.buyerName}
+                                              onChange={e => setPurchaseForm(f => ({ ...f, buyerName: e.target.value }))}
+                                              placeholder="خریدار"
+                                            />
+                                            <datalist id={`buyers-${truck.id}`}>
+                                              {store.customers.map(c => <option key={c.id} value={c.name} />)}
+                                            </datalist>
+                                          </div>
+                                          <div className="form-group" style={{ margin: 0 }}>
+                                            <label style={{ fontSize: '0.72rem' }}>کریٹس * (max {remaining})</label>
+                                            <input
+                                              type="number" min={1} max={remaining}
+                                              className="form-control" style={{ padding: '5px 8px', fontSize: '0.82rem' }}
+                                              value={purchaseForm.crates || ''}
+                                              onChange={e => setPurchaseForm(f => ({ ...f, crates: Math.min(Number(e.target.value), remaining) }))}
+                                            />
+                                          </div>
+                                          <div className="form-group" style={{ margin: 0 }}>
+                                            <label style={{ fontSize: '0.72rem' }}>ریٹ (فی کریٹ) *</label>
+                                            <input
+                                              type="number" min={0}
+                                              className="form-control" style={{ padding: '5px 8px', fontSize: '0.82rem' }}
+                                              value={purchaseForm.rate || ''}
+                                              onChange={e => setPurchaseForm(f => ({ ...f, rate: Number(e.target.value) }))}
+                                            />
+                                          </div>
+                                          <div className="form-group" style={{ margin: 0 }}>
+                                            <label style={{ fontSize: '0.72rem' }}>تاریخ</label>
+                                            <input
+                                              type="date"
+                                              className="form-control" style={{ padding: '5px 8px', fontSize: '0.82rem' }}
+                                              value={purchaseForm.date}
+                                              onChange={e => setPurchaseForm(f => ({ ...f, date: e.target.value }))}
+                                            />
+                                          </div>
+                                          <div className="form-group" style={{ margin: 0 }}>
+                                            <label style={{ fontSize: '0.72rem' }}>بل نمبر</label>
+                                            <input
+                                              className="form-control" style={{ padding: '5px 8px', fontSize: '0.82rem' }}
+                                              value={purchaseForm.billNo}
+                                              onChange={e => setPurchaseForm(f => ({ ...f, billNo: e.target.value }))}
+                                              placeholder="اختیاری"
+                                            />
+                                          </div>
+                                        </div>
+                                        {purchaseForm.crates > 0 && purchaseForm.rate > 0 && (
+                                          <p style={{ fontSize: '0.75rem', color: 'var(--green)', marginBottom: 8 }}>
+                                            کل رقم: Rs. {(purchaseForm.crates * purchaseForm.rate).toLocaleString()}
+                                            {store.customers.some(c => c.name.trim().toLowerCase() === purchaseForm.buyerName.trim().toLowerCase()) && (
+                                              <span style={{ marginLeft: 8, color: 'var(--blue)' }}>✓ خریدار ڈیش بورڈ میں بھی محفوظ ہوگا</span>
+                                            )}
+                                          </p>
+                                        )}
+                                        <div style={{ display: 'flex', gap: 8 }}>
+                                          <button
+                                            className="btn btn-primary" style={{ fontSize: '0.8rem', padding: '6px 14px' }}
+                                            disabled={purchaseSaving || !purchaseForm.buyerName || purchaseForm.crates <= 0 || purchaseForm.rate <= 0}
+                                            onClick={() => handleAddPurchase(truck)}
+                                          >
+                                            {purchaseSaving ? 'محفوظ ہو رہا ہے...' : '+ خریداری شامل کریں'}
+                                          </button>
+                                          <button className="btn btn-ghost" style={{ fontSize: '0.8rem' }} onClick={() => setPurchaseTruckId(null)}>منسوخ</button>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <button
+                                        className="btn btn-secondary"
+                                        style={{ fontSize: '0.78rem', padding: '6px 14px', color: 'var(--blue)', borderColor: 'var(--blue)' }}
+                                        onClick={() => { setPurchaseTruckId(truck.id); setPurchaseForm({ buyerName: '', crates: 0, rate: 0, date: new Date().toISOString().split('T')[0], billNo: '' }); }}
+                                      >
+                                        <Plus size={13} /> نئی خریداری شامل کریں ({remaining} کریٹس باقی)
+                                      </button>
+                                    )}
+                                  </div>
+
+                                </div>
+                              </td>
+                            </tr>
+                            );
+                          })()}
+                        </React.Fragment>
                       );
                     })}
                     {selectedSupplier.trucks.length === 0 && (
-                      <tr><td colSpan={7} className="empty-state">No trucks added yet</td></tr>
+                      <tr><td colSpan={8} className="empty-state">No trucks added yet</td></tr>
                     )}
                   </tbody>
                 </table>
@@ -737,14 +1068,14 @@ const SupplierModule: React.FC = () => {
 
                 <div className="glass-card" style={{ marginBottom: 20, padding: 16, background: 'linear-gradient(135deg, #2c3e50, #000000)', color: 'white', border: 'none' }}>
                   <h4 style={{ fontSize: '0.7rem', textTransform: 'uppercase', opacity: 0.6, marginBottom: 12 }}>Live Truck Calculation (بل کی تفصیل)</h4>
-                  <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+                  <div className="modal-preview-grid" style={{ gap: 12 }}>
                     <div>
                       <p style={{ fontSize: '0.65rem', opacity: 0.7 }}>Gross Total (کل رقم)</p>
                       <p style={{ fontWeight: 700 }}>{fmt(grossTotal)}</p>
                     </div>
                     <div>
-                      <p style={{ fontSize: '0.65rem', opacity: 0.7, color: 'var(--red)' }}>Deductions (Labour + Carriage + Truck Fare)</p>
-                      <p style={{ fontWeight: 700, color: '#ff3b30' }}>-{fmt(labourTotal + carriageTotal + Number(newEntry.truckFare))}</p>
+                      <p style={{ fontSize: '0.65rem', opacity: 0.7, color: 'var(--red)' }}>کل کٹوتیاں (Labour + Carriage + Fare + Advance + Bardana + Payments)</p>
+                      <p style={{ fontWeight: 700, color: '#ff3b30' }}>-{fmt(labourTotal + carriageTotal + Number(newEntry.truckFare) + Number(newEntry.advance) + Number(newEntry.bardana) + totalPaidInEntry)}</p>
                     </div>
                     <div>
                       <p style={{ fontSize: '0.65rem', opacity: 0.7 }}>Balance</p>

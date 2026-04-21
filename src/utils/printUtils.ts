@@ -21,10 +21,13 @@ export function isWithinPrintPeriod(dateStr: string | null | undefined, period: 
   return true; // 'all'
 }
 
+const URDU_MONTHS = ['جنوری','فروری','مارچ','اپریل','مئی','جون','جولائی','اگست','ستمبر','اکتوبر','نومبر','دسمبر'];
+
 export function getPeriodLabel(period: PrintPeriod): string {
   const now = new Date();
-  if (period === 'daily') return `Daily — ${now.toLocaleDateString()}`;
-  if (period === 'weekly') return `Weekly — ${now.toLocaleDateString()}`;
-  if (period === 'monthly') return `${now.toLocaleString('default', { month: 'long' })} ${now.getFullYear()}`;
-  return 'All Time';
+  const dateStr = now.toLocaleDateString('en-CA');
+  if (period === 'daily') return `یومیہ — ${dateStr}`;
+  if (period === 'weekly') return `ہفتہ وار — ${dateStr}`;
+  if (period === 'monthly') return `${URDU_MONTHS[now.getMonth()]} ${now.getFullYear()}`;
+  return 'کل وقت';
 }

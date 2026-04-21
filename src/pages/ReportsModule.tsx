@@ -65,16 +65,18 @@ const ReportsModule: React.FC = () => {
 
   const periodProfit = periodRevenue - periodExpenses;
   const periodCharity = Math.round(Math.max(0, periodProfit) * 0.10);
-  const periodNetProfit = periodProfit - periodCharity;
+  const periodAfterCharity = periodProfit - periodCharity;
+  const periodInvestorShare = Math.round(store.investors.reduce((s, inv) => s + Math.max(0, periodAfterCharity) * inv.sharePercent / 100, 0));
+  const periodNetProfit = periodAfterCharity - periodInvestorShare;
 
   // ── Remainings (all-time balances) ──
   const suppliersWithBalance = store.suppliers
     .filter(s => calcSupplierBalance(s) !== 0)
-    .map(s => ({ type: 'Supplier', name: s.name, city: s.city, balance: calcSupplierBalance(s) }));
+    .map(s => ({ type: 'بیوپاری', name: s.name, city: s.city, balance: calcSupplierBalance(s) }));
 
   const customersWithBalance = store.customers
     .filter(c => calcCustomerBalance(c) !== 0)
-    .map(c => ({ type: 'Customer', name: c.name, city: c.nickname, balance: calcCustomerBalance(c) }));
+    .map(c => ({ type: 'خریدار', name: c.name, city: c.nickname, balance: calcCustomerBalance(c) }));
 
   const allRemainings = [...suppliersWithBalance, ...customersWithBalance]
     .sort((a, b) => Math.abs(b.balance) - Math.abs(a.balance));
@@ -83,22 +85,27 @@ const ReportsModule: React.FC = () => {
   const totalReceivable = customersWithBalance.filter(c => c.balance > 0).reduce((s, x) => s + x.balance, 0);
 
   const handleExportPDF = () => {
-    const periodLabel = `${startDate} to ${endDate}`;
+    const periodLabel = `${startDate} تا ${endDate}`;
 
     if (activeReport === 'pnl') {
       // Combine supplier and customer transactions
       const supplierRows: string[][] = store.suppliers.flatMap(sup =>
-        sup.trucks.filter(t => isWithinPeriod(t.loadingDate)).flatMap(t =>
-          t.parties.map(p => [
-            sup.name, t.loadingDate, t.truckNo, String(p.crates),
-            `Rs. ${p.rate.toLocaleString()}`,
-            `Rs. ${(p.crates * p.rate).toLocaleString()}`,
-            `Rs. ${((t.labourCharges ?? 0) / (t.parties.length || 1)).toLocaleString()}`,
-            `Rs. ${((t.carriage ?? 0) / (t.parties.length || 1)).toLocaleString()}`,
-            `Rs. ${((p.crates * p.rate) - ((t.labourCharges ?? 0) / (t.parties.length || 1)) - ((t.carriage ?? 0) / (t.parties.length || 1))).toLocaleString()}`,
-            'Supplier',
-          ])
-        )
+        sup.trucks.filter(t => isWithinPeriod(t.loadingDate)).flatMap(t => {
+          const totalCratesT = t.parties.reduce((sum, pp) => sum + pp.crates, 0);
+          return t.parties.map(p => {
+            const partyLabour = totalCratesT > 0 ? Math.round((t.labourCharges ?? 0) * p.crates / totalCratesT) : 0;
+            const partyCarriage = totalCratesT > 0 ? Math.round((t.carriage ?? 0) * p.crates / totalCratesT) : 0;
+            return [
+              sup.name, t.loadingDate, t.truckNo, String(p.crates),
+              `Rs. ${p.rate.toLocaleString()}`,
+              `Rs. ${(p.crates * p.rate).toLocaleString()}`,
+              `Rs. ${partyLabour.toLocaleString()}`,
+              `Rs. ${partyCarriage.toLocaleString()}`,
+              `Rs. ${((p.crates * p.rate) - partyLabour - partyCarriage).toLocaleString()}`,
+              'بیوپاری',
+            ];
+          });
+        })
       );
 
       const customerRows: string[][] = store.customers.flatMap(c =>
@@ -109,67 +116,68 @@ const ReportsModule: React.FC = () => {
           `Rs. ${calcSaleCommission(s).toLocaleString()}`,
           `Rs. ${calcSaleCashWari(s).toLocaleString()}`,
           `Rs. ${calcSaleNet(s).toLocaleString()}`,
-          'Customer',
+          'خریدار',
         ])
       );
 
       const salesRows = [...supplierRows, ...customerRows].sort((a, b) => (b[1] || '').localeCompare(a[1] || ''));
 
       openPrintWindow({
-        title: 'Profit & Loss Report (منافع و نقصان)',
-        subtitle: `Revenue: Rs. ${periodRevenue.toLocaleString()} | Expenses: Rs. ${periodExpenses.toLocaleString()} | Net Profit: Rs. ${periodNetProfit.toLocaleString()}`,
+        title: 'منافع و نقصان رپورٹ',
+        subtitle: `آمدنی: Rs. ${periodRevenue.toLocaleString()} | اخراجات: Rs. ${periodExpenses.toLocaleString()} | خالص منافع: Rs. ${periodNetProfit.toLocaleString()}`,
         periodLabel,
         columns: [
-          { label: 'Name', urdu: 'نام' },
-          { label: 'Date', urdu: 'تاریخ' },
-          { label: 'Ref No', urdu: 'حوالہ' },
-          { label: 'Crates', urdu: 'کریٹس', align: 'right' },
-          { label: 'Rate', urdu: 'ریٹ', align: 'right' },
-          { label: 'Gross', urdu: 'کل رقم', align: 'right' },
-          { label: 'Labour/Comm', urdu: 'مزدوری/کمیشن', align: 'right' },
-          { label: 'Carriage/Wari', urdu: 'لاگا/واری', align: 'right' },
-          { label: 'Net', urdu: 'خالص', align: 'right' },
-          { label: 'Type', urdu: 'قسم' },
+          { label: 'نام' },
+          { label: 'تاریخ' },
+          { label: 'حوالہ' },
+          { label: 'کریٹس', align: 'right' },
+          { label: 'ریٹ', align: 'right' },
+          { label: 'کل رقم', align: 'right' },
+          { label: 'مزدوری/کمیشن', align: 'right' },
+          { label: 'لاگا/واری', align: 'right' },
+          { label: 'خالص', align: 'right' },
+          { label: 'قسم' },
         ],
         rows: salesRows,
         summaryRows: [
-          { label: 'Total Purchases (خریداری)', value: `Rs. ${periodTotalPurchases.toLocaleString()}` },
-          { label: 'Total Sales (فروخت)', value: `Rs. ${periodTotalSales.toLocaleString()}` },
-          { label: 'Total Revenue (آمدنی)', value: `Rs. ${periodRevenue.toLocaleString()}`, color: '#16a34a' },
-          { label: 'Total Expenses (اخراجات)', value: `Rs. ${periodExpenses.toLocaleString()}`, color: '#dc2626' },
-          { label: '10% Charity (صدقہ)', value: `Rs. ${periodCharity.toLocaleString()}`, color: '#d97706' },
-          { label: 'Net Profit (خالص منافع)', value: `Rs. ${periodNetProfit.toLocaleString()}`, bold: true, color: periodNetProfit >= 0 ? '#16a34a' : '#dc2626' },
+          { label: 'کل خریداری', value: `Rs. ${periodTotalPurchases.toLocaleString()}` },
+          { label: 'کل فروخت', value: `Rs. ${periodTotalSales.toLocaleString()}` },
+          { label: 'کل آمدنی', value: `Rs. ${periodRevenue.toLocaleString()}`, color: '#16a34a' },
+          { label: 'کل اخراجات', value: `Rs. ${periodExpenses.toLocaleString()}`, color: '#dc2626' },
+          { label: '۱۰٪ صدقہ', value: `Rs. ${periodCharity.toLocaleString()}`, color: '#d97706' },
+          { label: 'انویسٹر حصہ', value: `Rs. ${periodInvestorShare.toLocaleString()}`, color: '#7c3aed' },
+          { label: 'خالص منافع', value: `Rs. ${periodNetProfit.toLocaleString()}`, bold: true, color: periodNetProfit >= 0 ? '#16a34a' : '#dc2626' },
         ],
-        emptyMessage: 'No sales in this period',
+        emptyMessage: 'اس دور میں کوئی ریکارڈ نہیں',
       });
     } else {
       // Remainings report
       const rows: string[][] = allRemainings.map(e => [
-        e.type, e.name, e.city,
-        e.type === 'Supplier'
-          ? (e.balance > 0 ? 'Payable (دینا ہے)' : 'Advance Given')
-          : (e.balance > 0 ? 'Receivable (لینا ہے)' : 'Clear'),
+        e.type, e.name, e.city ?? '',
+        e.type === 'بیوپاری'
+          ? (e.balance > 0 ? 'دینا ہے' : 'پیشگی دی گئی')
+          : (e.balance > 0 ? 'لینا ہے' : 'صاف'),
         `Rs. ${Math.abs(e.balance).toLocaleString()}`,
       ]);
 
       openPrintWindow({
-        title: 'Remaining Balances (بقایا جات)',
-        subtitle: `${allRemainings.length} active balances`,
-        periodLabel: 'All Time',
+        title: 'بقایا جات',
+        subtitle: `${allRemainings.length} فعال بقایا`,
+        periodLabel: 'کل وقت',
         columns: [
-          { label: 'Type', urdu: 'قسم' },
-          { label: 'Name', urdu: 'نام' },
-          { label: 'City / Nickname', urdu: 'شہر' },
-          { label: 'Status', urdu: 'سٹیٹس' },
-          { label: 'Balance', urdu: 'بقایہ', align: 'right' },
+          { label: 'قسم' },
+          { label: 'نام' },
+          { label: 'شہر' },
+          { label: 'سٹیٹس' },
+          { label: 'بقایہ', align: 'right' },
         ],
         rows,
         summaryRows: [
-          { label: 'Total Payable to Suppliers', value: `Rs. ${totalPayable.toLocaleString()}`, color: '#dc2626' },
-          { label: 'Total Receivable from Customers', value: `Rs. ${totalReceivable.toLocaleString()}`, color: '#16a34a' },
-          { label: 'Net Position', value: `Rs. ${(totalReceivable - totalPayable).toLocaleString()}`, bold: true, color: (totalReceivable - totalPayable) >= 0 ? '#16a34a' : '#dc2626' },
+          { label: 'بیوپاریوں کو دینا ہے', value: `Rs. ${totalPayable.toLocaleString()}`, color: '#dc2626' },
+          { label: 'خریداروں سے لینا ہے', value: `Rs. ${totalReceivable.toLocaleString()}`, color: '#16a34a' },
+          { label: 'خالص پوزیشن', value: `Rs. ${(totalReceivable - totalPayable).toLocaleString()}`, bold: true, color: (totalReceivable - totalPayable) >= 0 ? '#16a34a' : '#dc2626' },
         ],
-        emptyMessage: 'No outstanding balances',
+        emptyMessage: 'کوئی بقایا نہیں',
       });
     }
   };
@@ -191,7 +199,7 @@ const ReportsModule: React.FC = () => {
           <p>Profit & Loss, Remaining Balances, Cash Flow</p>
         </div>
         <div className="page-actions">
-          <div style={{ display: 'flex', gap: 12, background: 'var(--card-bg)', padding: 12, borderRadius: 8, alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', background: 'var(--card-bg)', padding: 12, borderRadius: 8, alignItems: 'center' }}>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               <label style={{ fontSize: '0.85rem', fontWeight: 600 }}>From:</label>
               <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid var(--border)', fontSize: '0.9rem' }} />
@@ -215,7 +223,7 @@ const ReportsModule: React.FC = () => {
       {/* ── P&L ── */}
       {activeReport === 'pnl' && (
         <>
-          <div className="stats-grid" style={{ marginBottom: 24, gridTemplateColumns: 'repeat(4, 1fr)' }}>
+          <div className="stats-grid" style={{ marginBottom: 24 }}>
             <div className="glass-card" style={{ padding: 20 }}>
               <p style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', textTransform: 'uppercase', marginBottom: 4 }}>کل خریداری (Purchases)</p>
               <h3 style={{ margin: 0 }}>{fmt(periodTotalPurchases)}</h3>
@@ -245,7 +253,7 @@ const ReportsModule: React.FC = () => {
                 {fmt(periodNetProfit)}
               </h1>
               <p style={{ color: 'var(--text-secondary)', fontSize: '0.75rem', marginTop: 8 }}>
-                Gross Profit: {fmt(periodProfit)} — 10% Charity: {fmt(periodCharity)}
+                Gross Profit: {fmt(periodProfit)} — 10% Charity: {fmt(periodCharity)} — Investor Share: {fmt(periodInvestorShare)}
               </p>
             </div>
 
@@ -362,7 +370,7 @@ const ReportsModule: React.FC = () => {
                 </thead>
                 <tbody>
                   {allRemainings.map((entity, i) => {
-                    const isSupplier = entity.type === 'Supplier';
+                    const isSupplier = entity.type === 'بیوپاری';
                     const color = isSupplier
                       ? (entity.balance > 0 ? 'var(--red)' : 'var(--green)')
                       : (entity.balance > 0 ? 'var(--orange)' : 'var(--green)');

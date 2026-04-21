@@ -286,7 +286,7 @@ const Dashboard: React.FC = () => {
         ))}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 24 }}>
+      <div className="dash-mini-grid" style={{ display: 'grid', gap: 16, marginBottom: 24 }}>
         <div className="glass-card" style={{ padding: 20, display: 'flex', alignItems: 'center', gap: 16 }}>
           <div className="stat-icon purple"><Truck size={20} /></div>
           <div>
@@ -310,7 +310,7 @@ const Dashboard: React.FC = () => {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 20, marginBottom: 24 }}>
+      <div className="dash-charts-grid" style={{ display: 'grid', gap: 20, marginBottom: 24 }}>
         <div className="glass-card" style={{ padding: 24 }}>
           <h3 style={{ fontSize: '1rem', marginBottom: 20 }}>Sales vs Purchases (خرید و فروخت)</h3>
           <ResponsiveContainer width="100%" height={280}>
@@ -350,7 +350,7 @@ const Dashboard: React.FC = () => {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+      <div className="dash-tables-grid" style={{ display: 'grid', gap: 20 }}>
         <div className="glass-card" style={{ overflow: 'hidden' }}>
           <div className="table-header">
             <h3 style={{ fontSize: '1rem' }}>ٹاپ بیوپاری (Top Suppliers)</h3>

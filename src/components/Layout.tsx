@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   LayoutDashboard, Users, Truck, UserCheck, BarChart3,
-  DollarSign, Search, Menu, LogOut
+  DollarSign, Search, Menu, LogOut, X
 } from 'lucide-react';
 import { type AppUser } from '../store';
 
@@ -15,6 +15,12 @@ interface LayoutProps {
 
 const Layout: React.FC<LayoutProps> = ({ children, activePage, setActivePage, onSignOut, activeUser }) => {
   const isAdmin = activeUser?.role === 'admin';
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Close sidebar whenever the active page changes (mobile nav)
+  useEffect(() => {
+    setSidebarOpen(false);
+  }, [activePage]);
 
   const sections = [
     {
@@ -48,13 +54,21 @@ const Layout: React.FC<LayoutProps> = ({ children, activePage, setActivePage, on
 
   return (
     <div className="app-shell">
+      {/* ── Mobile Overlay ── */}
+      {sidebarOpen && (
+        <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />
+      )}
+
       {/* ── Sidebar ── */}
-      <aside className="sidebar">
+      <aside className={`sidebar${sidebarOpen ? ' sidebar-open' : ''}`}>
         <div className="sidebar-logo">
           <div className="sidebar-logo-icon">
             <DollarSign size={20} />
           </div>
           <h1>Abbasi & Co</h1>
+          <button className="sidebar-close-btn" onClick={() => setSidebarOpen(false)} aria-label="Close menu">
+            <X size={18} />
+          </button>
         </div>
 
         <nav style={{ flex: 1 }}>
@@ -115,13 +129,13 @@ const Layout: React.FC<LayoutProps> = ({ children, activePage, setActivePage, on
         {/* Top Bar */}
         <header className="topbar">
           <div className="topbar-left">
-            <button className="topbar-icon-btn"><Menu size={18} /></button>
+            <button className="topbar-icon-btn" onClick={() => setSidebarOpen(o => !o)} aria-label="Toggle menu"><Menu size={18} /></button>
             <h3 style={{ fontSize: '0.95rem', fontWeight: 600 }}>
               Abbasi & Co — Tomato Trading
             </h3>
           </div>
           <div className="topbar-right">
-            <div className="search-bar" style={{ maxWidth: 260 }}>
+            <div className="topbar-search search-bar" style={{ maxWidth: 260 }}>
               <Search className="search-icon" size={15} />
               <input placeholder="Search anything..." />
             </div>

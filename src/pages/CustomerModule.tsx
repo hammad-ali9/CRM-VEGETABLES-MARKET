@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useStore, calcCustomerBalance, calcCustomerTotalBill, calcCustomerTotalPayments, calcCustomerTotalAdvance, calcCustomerTotalReturns, calcCustomerTotalDiscount, calcSaleTotal, calcSaleCommission, calcSaleCashWari, calcSaleNet, type Customer, type CustomerSale, type CustomerReturn, CASH_WARI_CUSTOMER, CUSTOMER_COMMISSION_PERCENT } from '../store';
+import { useStore, calcCustomerBalance, calcCustomerTotalBill, calcCustomerTotalPayments, calcCustomerTotalAdvance, calcCustomerTotalReturns, calcCustomerTotalDiscount, calcSaleTotal, calcSaleCommission, calcSaleCashWari, calcSaleNet, type Customer, type CustomerSale, type CustomerReturn, CASH_WARI_CUSTOMER, CUSTOMER_COMMISSION_PERCENT, CUSTOMER_COMMISSION_DIVISOR } from '../store';
 import { Plus, ArrowLeft, DollarSign, Phone, Search, X, Edit2, Trash2, Download, Printer } from 'lucide-react';
 import { downloadCSV } from '../utils/exportUtils';
 import PrintModal from '../components/PrintModal';
@@ -392,7 +392,7 @@ const CustomerModule: React.FC = () => {
     const rows: string[][] = printData.flatMap(cust =>
       cust.sales.map(s => {
         const gross = s.crates * s.rate;
-        const comm = Math.round(gross * (s.commPercent ?? 7.25) / 100);
+        const comm = Math.round(gross / CUSTOMER_COMMISSION_DIVISOR);
         const wari = s.crates * (s.wariRate ?? 5);
         const net = gross + comm + wari;
         const adv = s.advance ?? 0;
@@ -407,43 +407,43 @@ const CustomerModule: React.FC = () => {
     );
 
     const totalGross = printData.reduce((s, c) => s + c.sales.reduce((ss, sl) => ss + sl.crates * sl.rate, 0), 0);
-    const totalComm = printData.reduce((s, c) => s + c.sales.reduce((ss, sl) => ss + Math.round(sl.crates * sl.rate * (sl.commPercent ?? 7.25) / 100), 0), 0);
+    const totalComm = printData.reduce((s, c) => s + c.sales.reduce((ss, sl) => ss + Math.round(sl.crates * sl.rate / CUSTOMER_COMMISSION_DIVISOR), 0), 0);
     const totalWari = printData.reduce((s, c) => s + c.sales.reduce((ss, sl) => ss + sl.crates * (sl.wariRate ?? 5), 0), 0);
     const totalNet = totalGross + totalComm + totalWari;
     const totalAdv = printData.reduce((s, c) => s + c.sales.reduce((ss, sl) => ss + (sl.advance ?? 0), 0), 0);
     const totalCratesAll = printData.reduce((s, c) => s + c.sales.reduce((ss, sl) => ss + sl.crates, 0), 0);
 
     openPrintWindow({
-      title: 'Customer Ledger (خریدار لیجر)',
-      subtitle: `${printData.length} customer(s) · ${totalCratesAll.toLocaleString()} crates`,
+      title: 'خریدار لیجر',
+      subtitle: `${printData.length} خریدار · ${totalCratesAll.toLocaleString()} کریٹس`,
       periodLabel,
       columns: [
-        { label: 'Customer', urdu: 'خریدار' },
-        { label: 'Nickname', urdu: 'عرفیت' },
-        { label: 'Phone', urdu: 'فون' },
-        { label: 'Date', urdu: 'تاریخ' },
-        { label: 'Bill No', urdu: 'بل نمبر' },
-        { label: 'Crates', urdu: 'کریٹس', align: 'right' },
-        { label: 'Rate', urdu: 'ریٹ', align: 'right' },
-        { label: 'Gross', urdu: 'کل رقم', align: 'right' },
-        { label: 'Comm', urdu: 'کمیشن', align: 'right' },
-        { label: 'Wari', urdu: 'واری', align: 'right' },
-        { label: 'Net Bill', urdu: 'بل', align: 'right' },
-        { label: 'Advance', urdu: 'بیانہ', align: 'right' },
-        { label: 'Remaining', urdu: 'بقایہ', align: 'right' },
-        { label: 'Mode', urdu: 'طریقہ' },
+        { label: 'خریدار' },
+        { label: 'عرفیت' },
+        { label: 'فون' },
+        { label: 'تاریخ' },
+        { label: 'بل نمبر' },
+        { label: 'کریٹس', align: 'right' },
+        { label: 'ریٹ', align: 'right' },
+        { label: 'کل رقم', align: 'right' },
+        { label: 'کمیشن', align: 'right' },
+        { label: 'واری', align: 'right' },
+        { label: 'بل', align: 'right' },
+        { label: 'بیانہ', align: 'right' },
+        { label: 'بقایہ', align: 'right' },
+        { label: 'طریقہ' },
       ],
       rows,
       summaryRows: [
-        { label: 'Total Crates (کل کریٹس)', value: totalCratesAll.toLocaleString() },
-        { label: 'Gross Total (کل رقم)', value: `Rs. ${totalGross.toLocaleString()}` },
-        { label: 'Commission (کمیشن)', value: `Rs. ${totalComm.toLocaleString()}`, color: '#16a34a' },
-        { label: 'Wari (واری)', value: `Rs. ${totalWari.toLocaleString()}`, color: '#16a34a' },
-        { label: 'Total Net Bill (کل بل)', value: `Rs. ${totalNet.toLocaleString()}`, bold: true },
-        { label: 'Total Advance (بیانہ)', value: `Rs. ${totalAdv.toLocaleString()}`, color: '#2563eb' },
-        { label: 'Total Remaining (بقایہ)', value: `Rs. ${(totalNet - totalAdv).toLocaleString()}`, bold: true, color: '#dc2626' },
+        { label: 'کل کریٹس', value: totalCratesAll.toLocaleString() },
+        { label: 'کل رقم', value: `Rs. ${totalGross.toLocaleString()}` },
+        { label: 'کمیشن', value: `Rs. ${totalComm.toLocaleString()}`, color: '#16a34a' },
+        { label: 'واری', value: `Rs. ${totalWari.toLocaleString()}`, color: '#16a34a' },
+        { label: 'کل بل', value: `Rs. ${totalNet.toLocaleString()}`, bold: true },
+        { label: 'بیانہ', value: `Rs. ${totalAdv.toLocaleString()}`, color: '#2563eb' },
+        { label: 'کل بقایہ', value: `Rs. ${(totalNet - totalAdv).toLocaleString()}`, bold: true, color: '#dc2626' },
       ],
-      emptyMessage: 'No customer records for this period',
+      emptyMessage: 'اس دور میں کوئی ریکارڈ نہیں',
     });
   };
 
@@ -451,7 +451,7 @@ const CustomerModule: React.FC = () => {
     const rs = (n: number) => `Rs. ${n.toLocaleString()}`;
     const rows: string[][] = cust.sales.map(s => {
       const gross = s.crates * s.rate;
-      const comm = Math.round(gross * (s.commPercent ?? 7.25) / 100);
+      const comm = Math.round(gross / CUSTOMER_COMMISSION_DIVISOR);
       const wari = s.crates * (s.wariRate ?? 5);
       const net = gross + comm + wari;
       const adv = s.advance ?? 0;
@@ -472,38 +472,38 @@ const CustomerModule: React.FC = () => {
     const totalBalance = calcCustomerBalance(cust);
 
     openPrintWindow({
-      title: `Customer Ledger — ${cust.name}`,
-      subtitle: `${cust.nickname || ''} · ${cust.phone || ''} · ${totalCratesAll.toLocaleString()} crates`,
-      periodLabel: 'All Time',
+      title: `خریدار لیجر — ${cust.name}`,
+      subtitle: `${cust.nickname || ''} · ${cust.phone || ''} · ${totalCratesAll.toLocaleString()} کریٹس`,
+      periodLabel: 'کل وقت',
       columns: [
-        { label: 'Date', urdu: 'تاریخ' },
-        { label: 'Bill No', urdu: 'بل نمبر' },
-        { label: 'Crates', urdu: 'کریٹس', align: 'right' },
-        { label: 'Rate', urdu: 'ریٹ', align: 'right' },
-        { label: 'Gross', urdu: 'کل رقم', align: 'right' },
-        { label: 'Comm', urdu: 'کمیشن', align: 'right' },
-        { label: 'Wari', urdu: 'واری', align: 'right' },
-        { label: 'Net Bill', urdu: 'بل', align: 'right' },
-        { label: 'Advance', urdu: 'بیانہ', align: 'right' },
-        { label: 'Remaining', urdu: 'بقایہ', align: 'right' },
-        { label: 'Mode', urdu: 'طریقہ' },
+        { label: 'تاریخ' },
+        { label: 'بل نمبر' },
+        { label: 'کریٹس', align: 'right' },
+        { label: 'ریٹ', align: 'right' },
+        { label: 'کل رقم', align: 'right' },
+        { label: 'کمیشن', align: 'right' },
+        { label: 'واری', align: 'right' },
+        { label: 'بل', align: 'right' },
+        { label: 'بیانہ', align: 'right' },
+        { label: 'بقایہ', align: 'right' },
+        { label: 'طریقہ' },
       ],
       rows,
       summaryRows: [
-        { label: 'Total Crates (کل کریٹس)', value: totalCratesAll.toLocaleString() },
-        { label: 'Gross Total (کل رقم)', value: rs(totalGross) },
-        { label: 'Commission (کمیشن)', value: rs(totalComm), color: '#16a34a' },
-        { label: 'Wari (واری)', value: rs(totalWari), color: '#16a34a' },
-        { label: 'Total Net Bill (کل بل)', value: rs(totalNet), bold: true },
-        { label: 'Total Advance (بیانہ)', value: rs(totalAdv), color: '#2563eb' },
-        { label: 'Pending Balance (بقایہ)', value: rs(totalBalance), bold: true, color: totalBalance > 0 ? '#dc2626' : '#16a34a' },
+        { label: 'کل کریٹس', value: totalCratesAll.toLocaleString() },
+        { label: 'کل رقم', value: rs(totalGross) },
+        { label: 'کمیشن', value: rs(totalComm), color: '#16a34a' },
+        { label: 'واری', value: rs(totalWari), color: '#16a34a' },
+        { label: 'کل بل', value: rs(totalNet), bold: true },
+        { label: 'بیانہ', value: rs(totalAdv), color: '#2563eb' },
+        { label: 'بقایہ', value: rs(totalBalance), bold: true, color: totalBalance > 0 ? '#dc2626' : '#16a34a' },
       ],
       emptyMessage: 'No records for this customer',
     });
   };
 
   const grossTotal = purchases.reduce((s, p) => s + Number(p.totalValue), 0);
-  const commAmount = Math.round(grossTotal * Number(newEntry.commPercent) / 100);
+  const commAmount = Math.round(grossTotal / CUSTOMER_COMMISSION_DIVISOR);
   const wariAmount = purchases.reduce((s, p) => s + Number(p.crates), 0) * Number(newEntry.wariRate);
   const netBill = grossTotal + commAmount + wariAmount;
   const discountAmount = purchases.reduce((s, p) => s + Number(p.discount || 0), 0);
@@ -862,16 +862,15 @@ const CustomerModule: React.FC = () => {
                   {editMode !== 'payment' && (
                     <>
                       <h4 style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', textTransform: 'uppercase', margin: '24px 0 12px' }}>ریٹ سیٹنگ (Rate Settings)</h4>
-                      <div className="form-grid cols-2" style={{ marginBottom: 20 }}>
+                      <div className="form-grid cols-1" style={{ marginBottom: 20 }}>
                         <div className="form-group">
-                          <label>Commission % (کمیشن فیصد)</label>
-                          <input type="number" step="0.01" className="form-control" required value={newEntry.commPercent} onChange={e => setNewEntry({ ...newEntry, commPercent: Number(e.target.value) })} />
-                        </div>
-                        <div className="form-group">
-                          <label>Wari Rate (واری ریٹ)</label>
+                          <label>Log Rate (لاگ ریٹ)</label>
                           <input type="number" step="0.1" className="form-control" value={newEntry.wariRate} onChange={e => setNewEntry({ ...newEntry, wariRate: Number(e.target.value) })} />
                         </div>
                       </div>
+                      <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: 16, marginTop: -8 }}>
+                        Commission is auto-calculated: Total Value ÷ 13.78
+                      </p>
 
                       <h4 style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', textTransform: 'uppercase', marginBottom: 12 }}>4-11. خریداری ڈیٹا (Purchase Data)</h4>
                       {purchases.map((p, idx) => (
@@ -930,8 +929,8 @@ const CustomerModule: React.FC = () => {
                               <span style={{ fontWeight: 600 }}>Rs. {(p.crates * newEntry.wariRate).toLocaleString()}</span>
                             </div>
                             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                              <span>9. کمیشن (7.25%) / Commission:</span>
-                              <span style={{ fontWeight: 600 }}>Rs. {Math.round((p.totalValue * newEntry.commPercent) / 100).toLocaleString()}</span>
+                              <span>9. کمیشن (÷13.78) / Commission:</span>
+                              <span style={{ fontWeight: 600 }}>Rs. {Math.round(p.totalValue / CUSTOMER_COMMISSION_DIVISOR).toLocaleString()}</span>
                             </div>
                           </div>
                           <div style={{ marginTop: 12 }}>
@@ -1218,16 +1217,15 @@ const CustomerModule: React.FC = () => {
                   <>
                     {/* Commission & Wari — shared across all purchases */}
                     <h4 style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', textTransform: 'uppercase', margin: '24px 0 12px' }}>ریٹ سیٹنگ (Rate Settings)</h4>
-                    <div className="form-grid cols-2" style={{ marginBottom: 20 }}>
+                    <div className="form-grid cols-1" style={{ marginBottom: 8 }}>
                       <div className="form-group">
-                        <label>Commission % (کمیشن فیصد)</label>
-                        <input type="number" step="0.01" className="form-control" required value={newEntry.commPercent} onChange={e => setNewEntry({ ...newEntry, commPercent: Number(e.target.value) })} />
-                      </div>
-                      <div className="form-group">
-                        <label>Wari Rate (واری ریٹ)</label>
+                        <label>Log Rate (لاگ ریٹ)</label>
                         <input type="number" step="0.1" className="form-control" value={newEntry.wariRate} onChange={e => setNewEntry({ ...newEntry, wariRate: Number(e.target.value) })} />
                       </div>
                     </div>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: 16 }}>
+                      Commission is auto-calculated: Total Value ÷ 13.78
+                    </p>
 
                     {/* Multiple Purchases */}
                     <h4 style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', textTransform: 'uppercase', marginBottom: 12 }}>4-11. خریداری ڈیٹا (Purchase Data)</h4>
@@ -1283,8 +1281,8 @@ const CustomerModule: React.FC = () => {
                             <span style={{ fontWeight: 600 }}>Rs. {(p.crates * newEntry.wariRate).toLocaleString()}</span>
                           </div>
                           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                            <span>9. کمیشن (7.25%) / Commission:</span>
-                            <span style={{ fontWeight: 600 }}>Rs. {Math.round((p.totalValue * newEntry.commPercent) / 100).toLocaleString()}</span>
+                            <span>9. کمیشن (÷13.78) / Commission:</span>
+                            <span style={{ fontWeight: 600 }}>Rs. {Math.round(p.totalValue / CUSTOMER_COMMISSION_DIVISOR).toLocaleString()}</span>
                           </div>
                         </div>
                         
@@ -1334,7 +1332,7 @@ const CustomerModule: React.FC = () => {
                         <span className="badge blue" style={{ background: 'rgba(0,122,255,0.2)', color: '#007aff', border: 'none' }}>Customer Invoice</span>
                       </div>
 
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 20 }}>
+                      <div className="modal-preview-grid" style={{ gap: 20 }}>
                         <div>
                           <p style={{ fontSize: '0.7rem', color: '#8e8e93', marginBottom: 4, textTransform: 'uppercase' }}>Gross Total (کل مال)</p>
                           <h3 style={{ margin: 0, fontSize: '1.1rem' }}>{fmt(grossTotal)}</h3>
@@ -1343,7 +1341,7 @@ const CustomerModule: React.FC = () => {
                           <p style={{ fontSize: '0.7rem', color: '#34c759', marginBottom: 4, textTransform: 'uppercase' }}>Additions (+ فویس)</p>
                           <div style={{ fontSize: '0.85rem' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                              <span>Tax/Comm ({newEntry.commPercent}%):</span>
+                              <span>Tax/Comm (÷13.78):</span>
                               <span style={{ fontWeight: 600 }}>{fmt(commAmount)}</span>
                             </div>
                             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2 }}>
